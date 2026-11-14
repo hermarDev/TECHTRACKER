@@ -1,0 +1,406 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPERADMIN
+  ADMIN
+  STUDENT
+}
+
+enum UserStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum AttendanceStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  ESCALATED
+}
+
+enum TaskAssignmentStatus {
+  ASSIGNED
+  IN_PROGRESS
+  SUBMITTED
+  RETURNED
+  ACCEPTED
+}
+
+enum RemarkVisibility {
+  STUDENT_VISIBLE
+  INTERNAL_STAFF_ONLY
+}
+
+enum UnitCondition {
+  FUNCTIONING
+  NEEDS_MAINTENANCE
+  NEEDS_REPAIR
+}
+
+enum InspectionStatus {
+  SUBMITTED
+  REVIEWED
+}
+
+enum ConversationType {
+  DIRECT
+  BATCH
+}
+
+enum NotificationType {
+  ASSIGNMENT
+  TASK_REVIEW
+  ATTENDANCE
+  INSPECTION
+  MESSAGE
+  ESCALATION
+  SYSTEM_ALERT
+}
+
+enum EscalationSource {
+  ATTENDANCE
+  TASK_REVIEW
+}
+
+enum EscalationStatus {
+  OPEN
+  APPROVED
+  UPHELD
+  DISMISSED
+}
+
+model User {
+  id                  String     @id @default(uuid())
+  email               String     @unique
+  passwordHash        String
+  fullName            String
+  role                Role       @default(STUDENT)
+  status              UserStatus @default(PENDING_VERIFICATION)
+  studentIdNo         String?    @unique
+  program             String?
+  section             String?
+  phone               String?
+  failedLoginCount    Int        @default(0)
+  lockedUntil         DateTime?
+  verificationToken   String?
+  verificationSentAt  DateTime?
+  batchId             String?
+  batch               Batch?     @relation("BatchStudents", fields: [batchId], references: [id])
+  requiredHours       Float      @default(100)
+  preOjtCompleted     Boolean    @default(false)
+  preOjtCompletedAt   DateTime?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  passwordResets      PasswordResetToken[]
+  coordinatedBatches  Batch[]              @relation("BatchCoordinator")
+  attendanceLogs      AttendanceLog[]      @relation("StudentAttendance")
+  reviewedAttendance  AttendanceLog[]      @relation("AttendanceReviewer")
+  correctedAttendance AttendanceLog[]      @relation("AttendanceCorrector")
+  createdTasks        Task[]               @relation("TaskCreator")
+  taskAssignments     TaskAssignment[]     @relation("StudentAssignments")
+  taskRemarks         TaskRemark[]         @relation("RemarkAuthor")
+  adminRooms          LabRoom[]            @relation("RoomAdmin")
+  studentRooms        LabRoom[]            @relation("RoomStudent")
+  inspections         Inspection[]         @relation("InspectionInspector")
+  reviewedInspections Inspection[]         @relation("InspectionReviewer")
+  conversationMembers ConversationMember[]
+  sentMessages        Message[]
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+  escalationsRaised   EscalationCase[]     @relation("EscalationRaisedBy")
+  escalationsStudent  EscalationCase[]     @relation("EscalationStudent")
+  escalationsRuled    EscalationCase[]     @relation("EscalationRuledBy")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model Batch {
+  id            String     @id @default(uuid())
+  name          String     @unique
+  section       String
+  academicYear  String
+  isActive      Boolean    @default(true)
+  coordinatorId String
+  coordinator   User       @relation("BatchCoordinator", fields: [coordinatorId], references: [id])
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  students      User[]     @relation("BatchStudents")
+  schedules     Schedule[]
+  attendance    AttendanceLog[]
+  tasks         Task[]
+  conversations Conversation[]
+}
+
+model Schedule {
+  id           String   @id @default(uuid())
+  batchId      String
+  batch        Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  label        String
+  startTime    String
+  endTime      String
+  graceMinutes Int      @default(15)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  attendanceLogs AttendanceLog[]
+}
+
+model AttendanceLog {
+  id               String           @id @default(uuid())
+  studentId        String
+  student          User             @relation("StudentAttendance", fields: [studentId], references: [id], onDelete: Cascade)
+  batchId          String
+  batch            Batch            @relation(fields: [batchId], references: [id])
+  scheduleId       String?
+  schedule         Schedule?        @relation(fields: [scheduleId], references: [id])
+  shiftDate        DateTime
+  timeIn           DateTime
+  timeOut          DateTime?
+  photoInKey       String
+  photoOutKey      String?
+  isIrregular      Boolean          @default(false)
+  irregularReason  String?
+  status           AttendanceStatus @default(PENDING)
+  recordedHours    Float            @default(0)
+  creditedHours    Float            @default(0)
+  reviewerId       String?
+  reviewer         User?            @relation("AttendanceReviewer", fields: [reviewerId], references: [id])
+  reviewerRemarks  String?
+  reviewedAt       DateTime?
+  correctedById    String?
+  correctedBy      User?            @relation("AttendanceCorrector", fields: [correctedById], references: [id])
+  correctionReason String?
+  correctedAt      DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+}
+
+model Task {
+  id           String           @id @default(uuid())
+  title        String
+  instructions String
+  category     String           @default("General Technical")
+  targetLab    String?
+  targetUnits  String?
+  deadline     DateTime
+  batchId      String?
+  batch        Batch?           @relation(fields: [batchId], references: [id])
+  createdById  String
+  createdBy    User             @relation("TaskCreator", fields: [createdById], references: [id])
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  assignments  TaskAssignment[]
+}
+
+model TaskAssignment {
+  id          String               @id @default(uuid())
+  taskId      String
+  task        Task                 @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  studentId   String
+  student     User                 @relation("StudentAssignments", fields: [studentId], references: [id], onDelete: Cascade)
+  status      TaskAssignmentStatus @default(ASSIGNED)
+  startedAt   DateTime?
+  acceptedAt  DateTime?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  submissions TaskSubmission[]
+  remarks     TaskRemark[]
+
+  @@unique([taskId, studentId])
+}
+
+model TaskSubmission {
+  id             String         @id @default(uuid())
+  assignmentId   String
+  assignment     TaskAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  version        Int            @default(1)
+  summary        String
+  attachmentKeys Json           @default("[]")
+  submittedAt    DateTime       @default(now())
+}
+
+model TaskRemark {
+  id           String           @id @default(uuid())
+  assignmentId String
+  assignment   TaskAssignment   @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  authorId     String
+  author       User             @relation("RemarkAuthor", fields: [authorId], references: [id])
+  visibility   RemarkVisibility
+  body         String
+  createdAt    DateTime         @default(now())
+}
+
+model LabRoom {
+  id                String         @id @default(uuid())
+  name              String         @unique
+  building          String
+  capacity          Int            @default(40)
+  isActive          Boolean        @default(true)
+  assignedAdminId   String?
+  assignedAdmin     User?          @relation("RoomAdmin", fields: [assignedAdminId], references: [id])
+  assignedStudentId String?
+  assignedStudent   User?          @relation("RoomStudent", fields: [assignedStudentId], references: [id])
+  createdAt         DateTime       @default(now())
+
+  units             ComputerUnit[]
+  inspections       Inspection[]
+}
+
+model ComputerUnit {
+  id              String        @id @default(uuid())
+  roomId          String
+  room            LabRoom       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  unitCode        String
+  specs           String        @default("Desktop Workstation")
+  condition       UnitCondition @default(FUNCTIONING)
+  lastInspectedAt DateTime?
+
+  inspectionItems InspectionItem[]
+
+  @@unique([roomId, unitCode])
+}
+
+model Inspection {
+  id           String           @id @default(uuid())
+  roomId       String
+  room         LabRoom          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  inspectorId  String
+  inspector    User             @relation("InspectionInspector", fields: [inspectorId], references: [id])
+  status       InspectionStatus @default(SUBMITTED)
+  summaryNote  String?
+  reviewedById String?
+  reviewedBy   User?            @relation("InspectionReviewer", fields: [reviewedById], references: [id])
+  reviewedAt   DateTime?
+  createdAt    DateTime         @default(now())
+
+  items        InspectionItem[]
+}
+
+model InspectionItem {
+  id           String        @id @default(uuid())
+  inspectionId String
+  inspection   Inspection    @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  unitId       String
+  unit         ComputerUnit  @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  condition    UnitCondition
+  remarks      String?
+  photoKey     String?
+}
+
+model Conversation {
+  id        String               @id @default(uuid())
+  title     String?
+  type      ConversationType
+  batchId   String?
+  batch     Batch?               @relation(fields: [batchId], references: [id])
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  members   ConversationMember[]
+  messages  Message[]
+}
+
+model ConversationMember {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt       DateTime     @default(now())
+
+  @@unique([conversationId, userId])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id])
+  body           String
+  attachmentKey  String?
+  attachmentName String?
+  attachmentMime String?
+  attachmentSize Int?
+  createdAt      DateTime     @default(now())
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  body      String
+  link      String?
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+}
+
+model EscalationCase {
+  id            String           @id @default(uuid())
+  sourceType    EscalationSource
+  sourceId      String
+  raisedById    String
+  raisedBy      User             @relation("EscalationRaisedBy", fields: [raisedById], references: [id])
+  studentId     String
+  student       User             @relation("EscalationStudent", fields: [studentId], references: [id])
+  summary       String
+  policyDetails String
+  status        EscalationStatus @default(OPEN)
+  rulingNote    String?
+  ruledById     String?
+  ruledBy       User?            @relation("EscalationRuledBy", fields: [ruledById], references: [id])
+  ruledAt       DateTime?
+  createdAt     DateTime         @default(now())
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  action     String
+  entityType String
+  entityId   String
+  details    Json     @default("{}")
+  createdAt  DateTime @default(now())
+}
+
+model SystemConfig {
+  id                    String   @id @default("singleton")
+  requiredPreOjtHours   Float    @default(100)
+  taskCategories        Json     @default("[\"PC Assembly\",\"OS Configuration\",\"Network Cabling\",\"Hardware Diagnostics\",\"Lab Maintenance\"]")
+  creditRoundingRule    String   @default("EXACT_MINUTES")
+  allowSelfRegistration Boolean  @default(true)
+  updatedAt             DateTime @updatedAt
+}
+
+model EmailOutbox {
+  id        String   @id @default(uuid())
+  toEmail   String
+  subject   String
+  body      String
+  category  String
+  createdAt DateTime @default(now())
+}
