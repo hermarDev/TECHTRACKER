@@ -169,7 +169,7 @@ export default function ProfilePage() {
   return (
     <AppShell
       user={shellUser ?? { id: "", fullName: "Loading...", email: "", role: "STUDENT" }}
-      title="Profile Management"
+      title="Account settings"
       subtitle="View your details, update contact information and change your password"
     >
       <div className="grid gap-5 lg:grid-cols-2">

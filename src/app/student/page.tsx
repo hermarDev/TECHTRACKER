@@ -241,7 +241,7 @@ export default async function StudentDashboardPage() {
                     {item.label}
                   </span>
                   <span className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                    <span className="truncate">{item.description}</span>
+                    <span className="line-clamp-2">{item.description}</span>
                     <ArrowRight className="size-3.5 shrink-0 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
                   </span>
                 </Link>

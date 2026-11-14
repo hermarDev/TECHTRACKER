@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 
-type User = { id: string; fullName: string; email: string; role: "STUDENT"; studentIdNo?: string | null; section?: string | null };
+type User = { id: string; fullName: string; email: string; role: "STUDENT"; studentIdNo?: string | null; section?: string | null; preOjtCompleted?: boolean };
 type Attendance = { 
   id: string; 
   status: string; 
@@ -289,17 +289,32 @@ export default function AttendancePage() {
         </section>
 
         <section className="rounded-xl border border-border bg-card">
-          <CardHeader className="pb-3 flex flex-row items-center justify-between">
+          <CardHeader className="pb-3 flex flex-wrap items-center justify-between gap-3">
             <div>
               <CardTitle>My attendance</CardTitle>
-              <CardDescription>Download your accreditation log when Pre-OJT is completed.</CardDescription>
+              <CardDescription>
+                {user.preOjtCompleted
+                  ? "Pre-OJT completed. Download your 100-Hour Internal Duty Accreditation Summary Log (PDF)."
+                  : "Accreditation PDF unlocks after 100 credited hours and all assigned tasks are accepted."}
+              </CardDescription>
             </div>
-            <Button variant="outline" size="sm" render={() => (
-                        <a href={`/api/attendance/accreditation-pdf?studentId=${user.id}`} className="inline-flex items-center gap-1">
-                          <Download className="size-3" />
-                          Download Accreditation Log (PDF)
-                        </a>
-                      )} />
+            {user.preOjtCompleted ? (
+              <Button
+                variant="outline"
+                size="sm"
+                render={
+                  <a href={`/api/attendance/accreditation-pdf?studentId=${user.id}`} className="inline-flex items-center gap-1" />
+                }
+              >
+                <Download className="size-3" />
+                Download Accreditation Log (PDF)
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" disabled title="Requires 100 credited hours and all assigned tasks accepted">
+                <Download className="size-3" />
+                Accreditation PDF Locked
+              </Button>
+            )}
           </CardHeader>
           <CardContent>
             {isLoading ? (

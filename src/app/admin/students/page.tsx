@@ -354,7 +354,7 @@ export default function AdminStudentsPage() {
         </Button>
       }
     >
-      <div className="grid gap-6">
+      <div className="grid min-w-0 gap-6">
         {error && (
           <Alert variant="destructive" className="border-destructive/40 bg-destructive/10">
             <CircleAlert />
@@ -364,7 +364,7 @@ export default function AdminStudentsPage() {
         )}
 
         {/* 15W — Directory filters */}
-        <section aria-labelledby="directory-heading" className="rounded-xl border border-border bg-card p-4 lg:p-5">
+        <section aria-labelledby="directory-heading" className="min-w-0 rounded-xl border border-border bg-card p-4 lg:p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 id="directory-heading" className="text-base font-semibold">
               Student directory
@@ -417,7 +417,7 @@ export default function AdminStudentsPage() {
               your batches.
             </p>
           ) : (
-            <div className="mt-4">
+            <div className="mt-4 min-w-0 overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>

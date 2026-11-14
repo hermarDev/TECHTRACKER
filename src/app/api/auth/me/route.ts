@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
 import { requireApiSession } from "@/lib/rbac";
 
 export async function GET(request: Request) {
@@ -7,6 +8,10 @@ export async function GET(request: Request) {
   if (!auth.ok) return auth.response;
 
   const { user } = auth;
+  const profile = await db.user.findUnique({
+    where: { id: user.id },
+    select: { preOjtCompleted: true },
+  });
   return NextResponse.json({
     user: {
       id: user.id,
@@ -15,6 +20,7 @@ export async function GET(request: Request) {
       role: user.role,
       status: user.status,
       batchId: user.batchId,
+      preOjtCompleted: profile?.preOjtCompleted ?? false,
     },
   });
 }

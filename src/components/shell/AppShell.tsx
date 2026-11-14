@@ -36,6 +36,7 @@ export interface ShellUser {
 interface NavItem {
   href: string;
   label: string;
+  shortLabel?: string;
   icon: React.ComponentType<{ className?: string }>;
   matchPrefix?: string;
 }
@@ -44,37 +45,37 @@ function getNavForRole(role: Role): NavItem[] {
   if (role === "SUPERADMIN") {
     return [
       { href: "/superadmin", label: "Console", icon: Shield },
-      { href: "/admin/attendance", label: "Attendance", icon: CalendarClock },
+      { href: "/admin/attendance", label: "Attendance", shortLabel: "Duty", icon: CalendarClock },
       { href: "/admin/tasks", label: "Tasks", icon: ClipboardCheck },
       { href: "/inspections", label: "Lab Units", icon: Laptop },
       { href: "/admin/batches", label: "Batches", icon: Layers },
       { href: "/admin/students", label: "Directory", icon: Users },
       { href: "/admin/reports", label: "Reports", icon: FileBarChart2 },
       { href: "/notifications", label: "Alerts", icon: Bell },
-      { href: "/profile", label: "Profile", icon: UserCircle },
+      { href: "/profile", label: "Account settings", icon: UserCircle },
     ];
   }
   if (role === "ADMIN") {
     return [
       { href: "/admin", label: "Dashboard", icon: Home },
-      { href: "/admin/attendance", label: "Attendance", icon: CalendarClock },
+      { href: "/admin/attendance", label: "Attendance", shortLabel: "Duty", icon: CalendarClock },
       { href: "/admin/tasks", label: "Tasks", icon: ClipboardCheck },
       { href: "/inspections", label: "Lab Audit", icon: Laptop },
       { href: "/admin/batches", label: "Batches", icon: Layers },
       { href: "/admin/students", label: "Directory", icon: Users },
       { href: "/admin/reports", label: "Reports", icon: FileBarChart2 },
       { href: "/messages", label: "Messages", icon: MessageSquare },
-      { href: "/profile", label: "Profile", icon: UserCircle },
+      { href: "/profile", label: "Account settings", icon: UserCircle },
     ];
   }
-  // STUDENT (04W Student Nav: Home, Attendance, Tasks, Lab Audit, Chat, Profile)
+  // STUDENT (04W Student Nav: Home, Attendance, Tasks, Lab Audit, Chat, Account settings)
   return [
     { href: "/student", label: "Home", icon: Home },
-    { href: "/attendance", label: "Attendance", icon: CalendarClock },
+    { href: "/attendance", label: "Attendance", shortLabel: "Duty", icon: CalendarClock },
     { href: "/tasks", label: "Tasks", icon: ClipboardCheck },
     { href: "/inspections", label: "Lab Audit", icon: Laptop },
     { href: "/messages", label: "Chat", icon: MessageSquare },
-    { href: "/profile", label: "Profile", icon: UserCircle },
+    { href: "/profile", label: "Account settings", icon: UserCircle },
   ];
 }
 
@@ -233,7 +234,7 @@ export function AppShell({
               )}
             >
               <Icon className="size-4" aria-hidden="true" />
-              <span className="truncate max-w-16">{item.label}</span>
+              <span className="truncate max-w-16">{item.shortLabel ?? item.label}</span>
             </Link>
           );
         })}

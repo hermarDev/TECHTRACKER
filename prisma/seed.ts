@@ -170,7 +170,10 @@ async function main() {
 
   const student3 = await prisma.user.upsert({
     where: { email: "joan.inting@student.aclc.edu.ph" },
-    update: {},
+    update: {
+      preOjtCompleted: true,
+      preOjtCompletedAt: new Date("2026-11-14T17:00:00Z"),
+    },
     create: {
       email: "joan.inting@student.aclc.edu.ph",
       passwordHash: demoPassHash,
@@ -182,8 +185,38 @@ async function main() {
       section: "BSIT-4B",
       batchId: batchB.id,
       requiredHours: 100,
+      preOjtCompleted: true,
+      preOjtCompletedAt: new Date("2026-11-14T17:00:00Z"),
     },
   });
+
+  const joanAttCount = await prisma.attendanceLog.count({ where: { studentId: student3.id } });
+  if (joanAttCount === 0) {
+    const baseDate = new Date("2026-10-15T08:00:00");
+    for (let i = 0; i < 13; i++) {
+      const day = new Date(baseDate.getTime() + i * 86400000);
+      const tIn = new Date(day);
+      const tOut = new Date(day.getTime() + 8 * 3600000);
+      await prisma.attendanceLog.create({
+        data: {
+          studentId: student3.id,
+          batchId: batchB.id,
+          scheduleId: schedMorning.id,
+          shiftDate: day,
+          timeIn: tIn,
+          timeOut: tOut,
+          photoInKey: "attendance/seed-timein.png",
+          photoOutKey: "attendance/seed-timein.png",
+          status: "APPROVED",
+          recordedHours: 8,
+          creditedHours: 8,
+          reviewerId: admin1.id,
+          reviewerRemarks: "Verified lab shift attendance",
+          reviewedAt: tOut,
+        },
+      });
+    }
+  }
 
   await prisma.user.upsert({
     where: { email: "pending.applicant@student.aclc.edu.ph" },
