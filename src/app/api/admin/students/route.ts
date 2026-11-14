@@ -1,3 +1,4 @@
+import type { Prisma, UserStatus } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { requireApiSession } from "@/lib/rbac";
@@ -24,7 +25,7 @@ export async function GET(req: Request) {
   const program = url.searchParams.get("program") || undefined;
   const section = url.searchParams.get("section") || undefined;
 
-  const where: any = { role: "STUDENT" };
+  const where: Prisma.UserWhereInput = { role: "STUDENT" };
   if (search) {
     where.OR = [
       { fullName: { contains: search, mode: "insensitive" } },
@@ -32,10 +33,18 @@ export async function GET(req: Request) {
       { email: { contains: search, mode: "insensitive" } },
     ];
   }
-  if (status) where.status = status;
+  if (status && ["PENDING_VERIFICATION", "ACTIVE", "SUSPENDED", "DEACTIVATED"].includes(status)) {
+    where.status = status as UserStatus;
+  }
   if (program) where.program = program;
   if (section) where.section = section;
-  if (user.role === "ADMIN") where.batch = { coordinatorId: user.id };
+  if (user.role === "ADMIN") {
+    where.AND = [
+      {
+        OR: [{ batch: { coordinatorId: user.id } }, { batchId: null }],
+      },
+    ];
+  }
 
   const [items, total] = await db.$transaction([
     db.user.findMany({

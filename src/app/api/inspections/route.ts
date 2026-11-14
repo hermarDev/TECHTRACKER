@@ -1,3 +1,4 @@
+import type { InspectionStatus, Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { requireApiSession, canInspectRoom } from "@/lib/rbac";
@@ -31,9 +32,11 @@ export async function GET(req: Request) {
   const roomId = url.searchParams.get("roomId") || undefined;
   const status = url.searchParams.get("status") || undefined;
 
-  const where: any = {};
+  const where: Prisma.InspectionWhereInput = {};
   if (roomId) where.roomId = roomId;
-  if (status) where.status = status;
+  if (status && ["SUBMITTED", "REVIEWED"].includes(status)) {
+    where.status = status as InspectionStatus;
+  }
 
   const [items, total] = await db.$transaction([
     db.inspection.findMany({

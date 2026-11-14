@@ -1,3 +1,4 @@
+import type { AttendanceStatus, Prisma, TaskAssignmentStatus } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { requireApiSession } from "@/lib/rbac";
@@ -5,7 +6,11 @@ import { normalizePagination } from "@/lib/validation";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { writeAuditLog } from "@/lib/audit";
-import { generateOperationalReportCsv, generateOperationalReportPdf } from "@/lib/reports-export";
+import {
+  generateOperationalReportCsv,
+  generateOperationalReportPdf,
+  type OperationalReportRow,
+} from "@/lib/reports-export";
 
 const reportSchema = z.object({
   type: z.enum(["attendance", "duty-hours", "task-progress", "lab-equipment"]).optional(),
@@ -36,29 +41,36 @@ export async function GET(req: Request) {
 
   const { type, batchId, section, program, status, dateFrom, dateTo, format, page, pageSize } = parse.data;
 
-  const where: any = {};
-  if (batchId) where.batchId = batchId;
-  if (section) where.section = section;
-  if (program) where.program = program;
-  if (status) where.status = status;
+  const attendanceWhere: Prisma.AttendanceLogWhereInput = {};
+  if (batchId) attendanceWhere.batchId = batchId;
+  if (section || program) {
+    attendanceWhere.student = {
+      ...(section ? { section } : {}),
+      ...(program ? { program } : {}),
+    };
+  }
+  if (status && ["PENDING", "APPROVED", "REJECTED", "ESCALATED"].includes(status)) {
+    attendanceWhere.status = status as AttendanceStatus;
+  }
   if (dateFrom || dateTo) {
-    where.shiftDate = {};
-    if (dateFrom) where.shiftDate.gte = new Date(dateFrom);
-    if (dateTo) where.shiftDate.lte = new Date(dateTo);
+    attendanceWhere.shiftDate = {
+      ...(dateFrom ? { gte: new Date(dateFrom) } : {}),
+      ...(dateTo ? { lte: new Date(dateTo) } : {}),
+    };
   }
   if (user.role === "ADMIN") {
-    where.batch = { coordinatorId: user.id };
+    attendanceWhere.batch = { coordinatorId: user.id };
   }
 
   const { page: p, pageSize: ps, skip, take } = normalizePagination(page, pageSize);
 
-  let rows: any[] = [];
+  let rows: OperationalReportRow[] = [];
   let total = 0;
 
   if (type === "attendance" || type === "duty-hours") {
     const [logs, cnt] = await db.$transaction([
-      db.attendanceLog.findMany({ where, orderBy: { shiftDate: "desc" }, skip, take, include: { student: { select: { id: true, fullName: true, studentIdNo: true, email: true } }, batch: { select: { id: true, name: true, section: true } } } }),
-      db.attendanceLog.count({ where }),
+      db.attendanceLog.findMany({ where: attendanceWhere, orderBy: { shiftDate: "desc" }, skip, take, include: { student: { select: { id: true, fullName: true, studentIdNo: true, email: true } }, batch: { select: { id: true, name: true, section: true } } } }),
+      db.attendanceLog.count({ where: attendanceWhere }),
     ]);
     rows = logs.map((l) => ({
       batch: l.batch.name,
@@ -69,9 +81,18 @@ export async function GET(req: Request) {
     }));
     total = cnt;
   } else if (type === "task-progress") {
+    const taskWhere: Prisma.TaskAssignmentWhereInput = {
+      ...(status && ["ASSIGNED", "IN_PROGRESS", "SUBMITTED", "RETURNED", "ACCEPTED"].includes(status)
+        ? { status: status as TaskAssignmentStatus }
+        : {}),
+      task: {
+        ...(batchId ? { batchId } : {}),
+        ...(user.role === "ADMIN" ? { createdById: user.id } : {}),
+      },
+    };
     const [assignments, cnt] = await db.$transaction([
-      db.taskAssignment.findMany({ where: { task: { batchId } }, orderBy: { createdAt: "desc" }, skip, take, include: { student: { select: { id: true, fullName: true, studentIdNo: true } }, task: { select: { id: true, title: true, batchId: true } } } }),
-      db.taskAssignment.count({ where: { task: { batchId } } }),
+      db.taskAssignment.findMany({ where: taskWhere, orderBy: { createdAt: "desc" }, skip, take, include: { student: { select: { id: true, fullName: true, studentIdNo: true } }, task: { select: { id: true, title: true, batchId: true } } } }),
+      db.taskAssignment.count({ where: taskWhere }),
     ]);
     rows = assignments.map((a) => ({
       batch: a.task.batchId ?? "",
@@ -82,9 +103,10 @@ export async function GET(req: Request) {
     }));
     total = cnt;
   } else if (type === "lab-equipment") {
+    const roomWhere: Prisma.LabRoomWhereInput = user.role === "ADMIN" ? { OR: [{ assignedAdminId: user.id }, { assignedAdminId: null }] } : {};
     const [rooms, cnt] = await db.$transaction([
-      db.labRoom.findMany({ orderBy: { name: "asc" }, skip, take, include: { units: true } }),
-      db.labRoom.count({ where }),
+      db.labRoom.findMany({ where: roomWhere, orderBy: { name: "asc" }, skip, take, include: { units: { orderBy: { unitCode: "asc" } } } }),
+      db.labRoom.count({ where: roomWhere }),
     ]);
     rows = rooms.flatMap((r) =>
       r.units.map((u) => ({
@@ -99,8 +121,8 @@ export async function GET(req: Request) {
   } else {
     // default: attendance summary
     const [logs, cnt] = await db.$transaction([
-      db.attendanceLog.findMany({ where, orderBy: { shiftDate: "desc" }, skip, take }),
-      db.attendanceLog.count({ where }),
+      db.attendanceLog.findMany({ where: attendanceWhere, orderBy: { shiftDate: "desc" }, skip, take }),
+      db.attendanceLog.count({ where: attendanceWhere }),
     ]);
     rows = logs.map((l) => ({ batch: "", section: "", metric: "Attendance", value: String(l.recordedHours), label: l.status }));
     total = cnt;

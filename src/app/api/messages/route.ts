@@ -65,7 +65,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parse.error.issues[0]?.message ?? "Invalid input" }, { status: 400 });
   }
 
-  const { conversationId, body: messageBody, attachmentKey, attachmentName, attachmentMime, attachmentSize } = parse.data;
+  const { conversationId, type, recipientIds, batchId, body: messageBody, attachmentKey, attachmentName, attachmentMime, attachmentSize } = parse.data;
 
   let conversation;
   if (conversationId) {
@@ -82,7 +82,72 @@ export async function POST(req: Request) {
     }
     conversation = existing;
   } else {
-    return NextResponse.json({ error: "conversationId is required" }, { status: 400 });
+    // Create new conversation
+    if (!type) {
+      return NextResponse.json({ error: "type (DIRECT | BATCH) is required when conversationId is omitted" }, { status: 400 });
+    }
+    if (type === "BATCH") {
+      if (!batchId) {
+        return NextResponse.json({ error: "batchId is required for BATCH type" }, { status: 400 });
+      }
+      // Verify batch exists and user is the coordinator
+      const batch = await db.batch.findUnique({
+        where: { id: batchId },
+        include: { coordinator: true, students: { select: { id: true } } },
+      });
+      if (!batch) {
+        return NextResponse.json({ error: "Batch not found" }, { status: 404 });
+      }
+      if (batch.coordinatorId !== user.id && user.role !== "SUPERADMIN") {
+        return NextResponse.json({ error: "Forbidden: not the batch coordinator" }, { status: 403 });
+      }
+      // Create batch conversation with all students as members
+      conversation = await db.conversation.create({
+        data: {
+          type: "BATCH",
+          batchId: batch.id,
+          members: {
+            create: [
+              { userId: user.id }, // coordinator
+              ...batch.students.map((s) => ({ userId: s.id })), // all students in batch
+            ],
+          },
+        },
+        include: {
+          members: { include: { user: { select: { id: true, fullName: true, email: true, role: true } } } },
+          batch: { select: { id: true, name: true, section: true } },
+        },
+      });
+    } else if (type === "DIRECT") {
+      if (!recipientIds || recipientIds.length === 0) {
+        return NextResponse.json({ error: "recipientIds is required for DIRECT type" }, { status: 400 });
+      }
+      // Verify all recipients exist and are eligible chat users (ADMIN or STUDENT; SuperAdmin has no chat access)
+      const recipients = await db.user.findMany({
+        where: { id: { in: recipientIds }, role: { in: ["ADMIN", "STUDENT"] }, status: "ACTIVE" },
+      });
+      if (recipients.length !== recipientIds.length) {
+        return NextResponse.json({ error: "One or more recipients not found or ineligible for chat" }, { status: 404 });
+      }
+      // Create direct conversation
+      conversation = await db.conversation.create({
+        data: {
+          type: "DIRECT",
+          members: {
+            create: [
+              { userId: user.id }, // sender
+              ...recipients.map((r) => ({ userId: r.id })),
+            ],
+          },
+        },
+        include: {
+          members: { include: { user: { select: { id: true, fullName: true, email: true, role: true } } } },
+          batch: { select: { id: true, name: true, section: true } },
+        },
+      });
+    } else {
+      return NextResponse.json({ error: "Invalid type" }, { status: 400 });
+    }
   }
 
   const message = await db.message.create({
@@ -108,5 +173,5 @@ export async function POST(req: Request) {
     details: { conversationId: conversation.id },
   });
 
-  return NextResponse.json({ message }, { status: 201 });
+  return NextResponse.json({ message, conversation }, { status: 201 });
 }

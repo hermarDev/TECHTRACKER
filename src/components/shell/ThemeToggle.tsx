@@ -16,18 +16,36 @@ function applyTheme(pref: ThemePref) {
 }
 
 export function ThemeToggle() {
-  const [pref, setPref] = React.useState<ThemePref>("system");
+  const pref = React.useSyncExternalStore<ThemePref>(
+    (onStoreChange) => {
+      if (typeof window === "undefined") return () => {};
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
+      const handleStorage = (e: StorageEvent) => {
+        if (e.key === "techtracker_theme") onStoreChange();
+      };
+      const handleCustom = () => onStoreChange();
+      mq.addEventListener("change", handleCustom);
+      window.addEventListener("storage", handleStorage);
+      window.addEventListener("techtracker-theme-change", handleCustom);
+      return () => {
+        mq.removeEventListener("change", handleCustom);
+        window.removeEventListener("storage", handleStorage);
+        window.removeEventListener("techtracker-theme-change", handleCustom);
+      };
+    },
+    () => {
+      try {
+        const saved = localStorage.getItem("techtracker_theme");
+        if (saved === "light" || saved === "dark" || saved === "system") return saved;
+      } catch {
+        // ignore
+      }
+      return "system";
+    },
+    () => "system"
+  );
 
   React.useEffect(() => {
-    try {
-      const saved = localStorage.getItem("techtracker_theme") as ThemePref | null;
-      if (saved === "light" || saved === "dark" || saved === "system") {
-        setPref(saved);
-      }
-    } catch {
-      // ignore
-    }
-
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handleMq = () => {
       try {
@@ -44,23 +62,23 @@ export function ThemeToggle() {
   const toggleLightDark = () => {
     const isDarkNow = document.documentElement.classList.contains("dark");
     const next: ThemePref = isDarkNow ? "light" : "dark";
-    setPref(next);
     try {
       localStorage.setItem("techtracker_theme", next);
     } catch {
       // ignore
     }
     applyTheme(next);
+    window.dispatchEvent(new Event("techtracker-theme-change"));
   };
 
   const setSystem = () => {
-    setPref("system");
     try {
       localStorage.setItem("techtracker_theme", "system");
     } catch {
       // ignore
     }
     applyTheme("system");
+    window.dispatchEvent(new Event("techtracker-theme-change"));
   };
 
   return (

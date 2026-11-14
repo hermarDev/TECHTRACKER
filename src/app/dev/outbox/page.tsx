@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
+
+export const dynamic = "force-dynamic";
 import { CircleAlert, Inbox, KeyRound, MailWarning, ShieldCheck } from "lucide-react";
 import { db } from "@/lib/db";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +42,9 @@ function formatTimestamp(date: Date): string {
  * instead of an SMTP provider.
  */
 export default async function DevOutboxPage() {
+  if (process.env.NODE_ENV === "production" && process.env.ENABLE_DEV_OUTBOX !== "1") {
+    notFound();
+  }
   const emails = await db.emailOutbox.findMany({
     orderBy: { createdAt: "desc" },
     take: 50,

@@ -3,7 +3,6 @@ import { cookies } from "next/headers";
 import { requireApiSession } from "@/lib/rbac";
 import { parse } from "papaparse";
 import * as XLSX from "xlsx";
-import { z } from "zod";
 import { db } from "@/lib/db";
 import { writeAuditLog } from "@/lib/audit";
 
@@ -18,7 +17,7 @@ type ImportRow = {
   password?: string;
 };
 
-function normalizeRow(row: any): ImportRow {
+function normalizeRow(row: Record<string, unknown>): ImportRow {
   const get = (key: string) => {
     const val = row[key] ?? row[key.toLowerCase()] ?? row[key.toUpperCase()];
     return val == null ? undefined : String(val).trim();

@@ -14,13 +14,21 @@ import autoTable from "jspdf-autotable";
 
 type CsvRow = Record<string, unknown>;
 
+function sanitizeCsvCell(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+}
+
 // ---------------------------------------------------------------------------
 // CSV (papaparse)
 // ---------------------------------------------------------------------------
 
 export function generateCsv(rows: readonly CsvRow[]): string {
   if (rows.length === 0) return "";
-  return unparse(rows as Record<string, unknown>[]);
+  const safeRows = rows.map((row) =>
+    Object.fromEntries(Object.entries(row).map(([k, v]) => [k, sanitizeCsvCell(v)]))
+  );
+  return unparse(safeRows);
 }
 
 export function generateCsvWithFields<T extends object>(
@@ -33,7 +41,7 @@ export function generateCsvWithFields<T extends object>(
     const record = row as CsvRow;
     const out: CsvRow = {};
     for (const field of fields) {
-      out[field] = record[field];
+      out[field] = sanitizeCsvCell(record[field]);
     }
     return out;
   });

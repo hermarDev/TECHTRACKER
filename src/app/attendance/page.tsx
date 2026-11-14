@@ -5,54 +5,362 @@ import { AppShell } from "@/components/shell/AppShell";
 import { StatusBadge } from "@/components/shell/StatusBadge";
 import { DataTablePagination } from "@/components/shell/DataTablePagination";
 import { useDraftForm } from "@/hooks/useDraftForm";
+import { toast } from "sonner";
+import { Camera, Download, Image, CheckCircle2, CircleAlert, Loader2, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 
 type User = { id: string; fullName: string; email: string; role: "STUDENT"; studentIdNo?: string | null; section?: string | null };
-type Attendance = { id: string; status: string; timeIn: string; timeOut?: string | null; recordedHours: number; isIrregular: boolean };
+type Attendance = { 
+  id: string; 
+  status: string; 
+  timeIn: string; 
+  timeOut?: string | null; 
+  recordedHours: number; 
+  isIrregular: boolean;
+  studentId: string;
+  photoInKey: string;
+  photoOutKey?: string | null;
+  schedule?: { label: string } | null;
+};
+type Schedule = { id: string; label: string; startTime: string; endTime: string; graceMinutes: number; batchId: string };
 
 export default function AttendancePage() {
   const [user, setUser] = React.useState<User | null>(null);
   const [items, setItems] = React.useState<Attendance[]>([]);
-  const [message, setMessage] = React.useState("");
-  const [photo, setPhoto] = React.useState<File | null>(null);
+  const [schedules, setSchedules] = React.useState<Schedule[]>([]);
   const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(15);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [cameraStream, setCameraStream] = React.useState<MediaStream | null>(null);
+  const [isCameraOpen, setIsCameraOpen] = React.useState(false);
+  const [capturedPhoto, setCapturedPhoto] = React.useState<string | null>(null);
+  const [photoFile, setPhotoFile] = React.useState<File | null>(null);
+  const [previewPhoto, setPreviewPhoto] = React.useState<string | null>(null);
+  
   const form = useDraftForm("techtracker-attendance-draft", { scheduleId: "", shiftDate: "" });
+
   const load = React.useCallback(async () => {
-    const [me, attendance] = await Promise.all([fetch("/api/auth/me"), fetch("/api/attendance?page=1&pageSize=15")]);
-    if (me.ok) setUser((await me.json()).user);
-    if (attendance.ok) setItems((await attendance.json()).items);
-  }, []);
-  React.useEffect(() => { void load(); }, [load]);
-  const submit = async (action: "TIME_IN" | "TIME_OUT", attendanceId?: string) => {
-    if (!photo) return setMessage("A photo is required.");
-    const data = new FormData();
-    data.set("action", action);
-    data.set("photo", photo);
-    if (action === "TIME_IN") { data.set("scheduleId", form.values.scheduleId); data.set("shiftDate", form.values.shiftDate); }
-    if (attendanceId) data.set("attendanceId", attendanceId);
-    const response = await fetch("/api/attendance", { method: "POST", body: data });
-    const body = await response.json();
-    setMessage(response.ok ? `Confirmed receipt: ${body.receipt.id}` : body.error);
-    if (response.ok) { form.clearDraft(); setPhoto(null); await load(); }
+    setIsLoading(true);
+    try {
+      const [me, attendance] = await Promise.all([
+        fetch("/api/auth/me"),
+        fetch(`/api/attendance?page=${page}&pageSize=${pageSize}`)
+      ]);
+      if (me.ok) setUser((await me.json()).user);
+      if (attendance.ok) {
+        const data = await attendance.json();
+        setItems(data.items);
+        setSchedules(data.schedules || []);
+      }
+    } catch (error) {
+      toast.error("Failed to load attendance data");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [page, pageSize]);
+
+  React.useEffect(() => {
+    let mounted = true;
+    const doLoad = async () => {
+      const [me, attendance] = await Promise.all([
+        fetch("/api/auth/me"),
+        fetch(`/api/attendance?page=${page}&pageSize=${pageSize}`)
+      ]);
+      if (mounted) {
+        if (me.ok) setUser((await me.json()).user);
+        if (attendance.ok) {
+          const data = await attendance.json();
+          setItems(data.items);
+          setSchedules(data.schedules || []);
+        }
+        setIsLoading(false);
+      }
+    };
+    doLoad();
+    return () => { mounted = false; };
+  }, [page, pageSize]);
+
+  const openCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: "environment" },
+        audio: false 
+      });
+      setCameraStream(stream);
+      setIsCameraOpen(true);
+    } catch {
+      toast.error("Camera access denied. Please use file upload instead.");
+    }
   };
+
+  const closeCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+    setIsCameraOpen(false);
+    setCapturedPhoto(null);
+  };
+
+  const takePhoto = async () => {
+    if (!cameraStream) return;
+    const video = document.createElement("video");
+    video.srcObject = cameraStream;
+    await video.play();
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.drawImage(video, 0, 0);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+      setCapturedPhoto(dataUrl);
+      // Convert to File
+      fetch(dataUrl)
+        .then(res => res.blob())
+        .then(blob => {
+          const file = new File([blob], "attendance-photo.jpg", { type: "image/jpeg" });
+          setPhotoFile(file);
+          setPreviewPhoto(dataUrl);
+        });
+    }
+    closeCamera();
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    if (file) {
+      setPhotoFile(file);
+      const url = URL.createObjectURL(file);
+      setPreviewPhoto(url);
+      setCapturedPhoto(null);
+    }
+  };
+
+  const submit = async (action: "TIME_IN" | "TIME_OUT", attendanceId?: string) => {
+    if (!photoFile) return toast.error("A photo is required.");
+    setIsSubmitting(true);
+    try {
+      const data = new FormData();
+      data.set("action", action);
+      data.set("photo", photoFile);
+      if (action === "TIME_IN") { 
+        data.set("scheduleId", form.values.scheduleId); 
+        data.set("shiftDate", form.values.shiftDate); 
+      }
+      if (attendanceId) data.set("attendanceId", attendanceId);
+      const response = await fetch("/api/attendance", { method: "POST", body: data });
+      const body = await response.json();
+      if (response.ok) {
+        toast.success(`Confirmed receipt: ${body.receipt.id}`);
+        form.clearDraft();
+        setPhotoFile(null);
+        setPreviewPhoto(null);
+        await load();
+      } else {
+        toast.error(body.error || "Failed to record attendance");
+      }
+    } catch {
+      toast.error("Network error. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   if (!user) return <main className="p-8">Loading attendance...</main>;
-  return <AppShell user={user} title="Attendance" subtitle="Photo-assisted duty log; no location tracking.">
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
-      <section className="rounded-xl border border-border bg-card p-5">
-        <h2 className="font-semibold">Record duty</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Use the camera or choose an image file. GPS is never requested.</p>
-        <div className="mt-4 grid gap-3">
-          <label className="grid gap-1 text-sm">Scheduled shift<select className="h-11 rounded-md border bg-background px-3" value={form.values.scheduleId} onChange={(e) => form.setValues({ scheduleId: e.target.value })}><option value="">Select a scheduled shift</option><option value="current">Current scheduled shift</option></select></label>
-          <label className="grid gap-1 text-sm">Shift date<input type="date" className="h-11 rounded-md border bg-background px-3" value={form.values.shiftDate} onChange={(e) => form.setValues({ shiftDate: e.target.value })} /></label>
-          <label className="grid gap-1 text-sm">Evidence photo<input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(e) => setPhoto(e.target.files?.[0] ?? null)} /></label>
-          <button className="min-h-11 rounded-md bg-primary px-4 text-primary-foreground" onClick={() => void submit("TIME_IN")}>Confirm Time-In</button>
-          {message && <p role="alert" className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm">{message}</p>}
-        </div>
-      </section>
-      <section className="rounded-xl border border-border bg-card p-5">
-        <h2 className="font-semibold">My attendance</h2>
-        <div className="mt-4 divide-y">{items.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 py-3"><div><p className="font-medium tabular-ledger">{new Date(item.timeIn).toLocaleString()}</p><p className="text-sm text-muted-foreground">{item.recordedHours.toFixed(2)} hours</p></div><div className="flex items-center gap-2"><StatusBadge status={item.isIrregular ? "IRREGULAR" : item.status} />{!item.timeOut && <button className="min-h-9 rounded-md border px-3 text-sm" onClick={() => void submit("TIME_OUT", item.id)}>Time-Out</button>}</div></div>)}</div>
-        <DataTablePagination page={page} pageSize={15} total={items.length} onPageChange={setPage} onPageSizeChange={() => undefined} />
-      </section>
-    </div>
-  </AppShell>;
+
+  return (
+    <AppShell user={user} title="Attendance" subtitle="Photo-assisted duty log; no location tracking.">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
+        <section className="rounded-xl border border-border bg-card">
+          <CardHeader className="pb-3">
+            <CardTitle>Record duty</CardTitle>
+            <CardDescription>Use the camera or choose an image file. GPS is never requested.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="scheduleId">Scheduled shift</Label>
+              <Select value={form.values.scheduleId || ""} onValueChange={(value) => form.setValues({ scheduleId: value || "" })}>
+                <SelectTrigger className="h-11">
+                  <SelectValue placeholder="Select a scheduled shift" />
+                </SelectTrigger>
+                <SelectContent>
+                  {schedules.map((schedule) => (
+                    <SelectItem key={schedule.id} value={schedule.id}>
+                      {schedule.label} ({schedule.startTime}–{schedule.endTime})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="shiftDate">Shift date</Label>
+              <Input
+                id="shiftDate"
+                type="date"
+                className="h-11"
+                value={form.values.shiftDate}
+                onChange={(e) => form.setValues({ shiftDate: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Evidence photo</Label>
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2">
+                  <Dialog>
+                    <DialogTrigger>
+                      <Button variant="outline" onClick={openCamera} disabled={isCameraOpen}>
+                        <Camera className="size-4 mr-2" />
+                        Open Camera
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-sm max-h-[90dvh]">
+                      <DialogHeader>
+                        <DialogTitle>Camera Capture</DialogTitle>
+                        <DialogDescription>Position yourself in the frame and click Take Photo</DialogDescription>
+                      </DialogHeader>
+                      <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
+                        {cameraStream && (
+                          <video 
+                            ref={(el) => { if (el) el.srcObject = cameraStream; }} 
+                            autoPlay 
+                            playsInline 
+                            className="w-full h-full object-cover" 
+                          />
+                        )}
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={closeCamera}>Cancel</Button>
+                        <Button onClick={takePhoto} disabled={!cameraStream}>
+                          <Camera className="size-4 mr-2" />
+                          Take Photo
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                  <Button variant="outline" onClick={() => document.getElementById("photo-upload")?.click()}>
+                    <Image className="size-4 mr-2" />
+                    Choose File
+                  </Button>
+                </div>
+                <input
+                  id="photo-upload"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  capture="environment"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+                {previewPhoto && (
+                  <div className="relative w-fit">
+                    <img src={previewPhoto} alt="Preview" className="h-24 w-24 object-cover rounded-lg border" />
+                    <button
+                      type="button"
+                      onClick={() => { setPhotoFile(null); setPreviewPhoto(null); setCapturedPhoto(null); }}
+                      className="absolute -top-2 -right-2 rounded-full bg-destructive text-destructive-foreground size-6 hover:bg-destructive/90"
+                      aria-label="Remove photo"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <Button 
+              className="w-full min-h-11" 
+              onClick={() => void submit("TIME_IN")} 
+              disabled={isSubmitting || !form.values.scheduleId || !form.values.shiftDate || !photoFile}
+            >
+              {isSubmitting && <Loader2 className="size-4 mr-2 animate-spin" />}
+              Confirm Time-In
+            </Button>
+          </CardContent>
+        </section>
+
+        <section className="rounded-xl border border-border bg-card">
+          <CardHeader className="pb-3 flex flex-row items-center justify-between">
+            <div>
+              <CardTitle>My attendance</CardTitle>
+              <CardDescription>Download your accreditation log when Pre-OJT is completed.</CardDescription>
+            </div>
+            <Button variant="outline" size="sm" render={() => (
+                        <a href={`/api/attendance/accreditation-pdf?studentId=${user.id}`} className="inline-flex items-center gap-1">
+                          <Download className="size-3" />
+                          Download Accreditation Log (PDF)
+                        </a>
+                      )} />
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="size-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : items.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                No attendance records yet.
+              </div>
+            ) : (
+              <>
+                <div className="divide-y">
+                  {items.map((item) => (
+                    <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 py-4">
+                      <div>
+                        <p className="font-medium tabular-ledger">{new Date(item.timeIn).toLocaleString()}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {item.schedule?.label && <span className="mr-2">{item.schedule.label} · </span>}
+                          {item.recordedHours.toFixed(2)} hours
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge 
+                          variant={item.isIrregular ? "destructive" : item.status === "APPROVED" ? "default" : "secondary"}
+                          className={item.isIrregular ? "bg-destructive/10 text-destructive" : ""}
+                        >
+                          {item.isIrregular ? "IRREGULAR" : item.status}
+                        </Badge>
+                        {!item.timeOut && (
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={() => void submit("TIME_OUT", item.id)}
+                            disabled={isSubmitting}
+                          >
+                            Time-Out
+                          </Button>
+                        )}
+                        {item.timeOut && (
+                          <Badge variant="outline" className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                            <CheckCircle2 className="size-3 mr-1" />
+                            Completed
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <DataTablePagination 
+                  page={page} 
+                  pageSize={pageSize} 
+                  total={items.length} 
+                  onPageChange={setPage} 
+                  onPageSizeChange={setPageSize} 
+                />
+              </>
+            )}
+          </CardContent>
+        </section>
+      </div>
+    </AppShell>
+  );
 }

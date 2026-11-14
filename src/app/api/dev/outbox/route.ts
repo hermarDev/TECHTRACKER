@@ -9,6 +9,9 @@ import { db } from "@/lib/db";
  * disabled or secured before any real deployment.
  */
 export async function GET(request: Request) {
+  if (process.env.NODE_ENV === "production" && process.env.ENABLE_DEV_OUTBOX !== "1") {
+    return NextResponse.json({ error: "Not available in production" }, { status: 404 });
+  }
   const limitParam = Number(new URL(request.url).searchParams.get("limit") ?? 50);
   const take = Number.isFinite(limitParam) ? Math.min(Math.max(1, Math.floor(limitParam)), 100) : 50;
 

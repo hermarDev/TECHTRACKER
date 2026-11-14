@@ -11,17 +11,25 @@ export function useDraftForm<T extends Record<string, unknown>>(
   const [restoredDraft, setRestoredDraft] = React.useState(false);
 
   React.useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(storageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<T>;
-        setValues((prev) => ({ ...prev, ...parsed }));
-        setRestoredDraft(true);
-        setIsDirty(true);
+    let active = true;
+    const timer = window.setTimeout(() => {
+      if (!active) return;
+      try {
+        const raw = window.localStorage.getItem(storageKey);
+        if (raw) {
+          const parsed = JSON.parse(raw) as Partial<T>;
+          setValues((prev) => ({ ...prev, ...parsed }));
+          setRestoredDraft(true);
+          setIsDirty(true);
+        }
+      } catch {
+        // Ignore corrupt or blocked localStorage
       }
-    } catch {
-      // Ignore corrupt or blocked localStorage
-    }
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
   }, [storageKey]);
 
   const updateValues = React.useCallback(

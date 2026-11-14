@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { requireApiSession, canAccessBatchScope } from "@/lib/rbac";
+import { requireApiSession } from "@/lib/rbac";
 import { db } from "@/lib/db";
 import { saveUploadedObject, validateUploadFile } from "@/lib/storage";
 import { calculateSessionHours, evaluateScheduleWindow } from "@/lib/hours";
@@ -55,6 +55,18 @@ export async function GET(request: NextRequest) {
     where.batch = { coordinatorId: auth.user.id };
   }
 
+  // Fetch schedules for the student's batch (or all active schedules for admin)
+  const schedules = await db.schedule.findMany({
+    where: {
+      isActive: true,
+      ...(auth.user.role === "STUDENT" && auth.user.batchId
+        ? { batchId: auth.user.batchId }
+        : {}),
+    },
+    orderBy: { label: "asc" },
+    select: { id: true, label: true, startTime: true, endTime: true, graceMinutes: true, batchId: true },
+  });
+
   const [items, total] = await Promise.all([
     db.attendanceLog.findMany({
       where,
@@ -65,7 +77,22 @@ export async function GET(request: NextRequest) {
     }),
     db.attendanceLog.count({ where }),
   ]);
-  return NextResponse.json({ items, total, page: pagination.page, pageSize: pagination.pageSize });
+  
+  // Include studentId and photoInKey/photoOutKey on items
+  const itemsWithKeys = items.map(item => ({
+    ...item,
+    studentId: item.studentId,
+    photoInKey: item.photoInKey,
+    photoOutKey: item.photoOutKey,
+  }));
+
+  return NextResponse.json({ 
+    items: itemsWithKeys, 
+    schedules,
+    total, 
+    page: pagination.page, 
+    pageSize: pagination.pageSize 
+  });
 }
 
 export async function POST(request: NextRequest) {

@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { requireApiSession } from "@/lib/rbac";
@@ -43,7 +44,7 @@ export async function GET(req: Request) {
   const search = url.searchParams.get("search") || undefined;
   const isActive = url.searchParams.get("isActive");
 
-  const where: any = {};
+  const where: Prisma.BatchWhereInput = {};
   if (search) {
     where.OR = [{ name: { contains: search, mode: "insensitive" } }, { section: { contains: search, mode: "insensitive" } }];
   }

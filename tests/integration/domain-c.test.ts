@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { normalizePagination, ALLOWED_PAGE_SIZES } from "@/lib/validation";
 import { canUseMessaging } from "@/lib/rbac";
