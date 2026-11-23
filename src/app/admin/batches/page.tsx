@@ -2,12 +2,15 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { CheckCircle2, CircleAlert, Layers, Pencil, Power, Search, Users } from "lucide-react";
+import { CheckCircle2, CircleAlert, Layers, Pencil, PowerOff, Users } from "lucide-react";
 import type { Role } from "@prisma/client";
 
 import { AppShell } from "@/components/shell/AppShell";
 import { StatusBadge } from "@/components/shell/StatusBadge";
 import { DataTablePagination } from "@/components/shell/DataTablePagination";
+import { DataTableToolbar } from "@/components/shell/DataTableToolbar";
+import { FloatingInput } from "@/components/shell/FloatingInput";
+import { InlineError } from "@/components/shell/InlineError";
 import { useDraftForm } from "@/hooks/useDraftForm";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -92,11 +95,15 @@ export default function AdminBatchesPage() {
   const [wizardStep, setWizardStep] = React.useState(1);
   const [wizardStudents, setWizardStudents] = React.useState<DirectoryStudent[]>([]);
   const [wizardError, setWizardError] = React.useState<string | null>(null);
+  const [wizardFieldErrors, setWizardFieldErrors] = React.useState({
+    name: "", section: "", academicYear: "", scheduleLabel: "", startTime: "", endTime: "", graceMinutes: "",
+  });
   const [wizardBusy, setWizardBusy] = React.useState(false);
 
   const [editing, setEditing] = React.useState<Batch | null>(null);
   const [editDraft, setEditDraft] = React.useState({ name: "", section: "", academicYear: "" });
   const [editError, setEditError] = React.useState<string | null>(null);
+  const [editFieldErrors, setEditFieldErrors] = React.useState({ name: "", section: "", academicYear: "" });
   const [editBusy, setEditBusy] = React.useState(false);
 
   const wizard = useDraftForm<WizardDraft>("techtracker-batch-wizard", WIZARD_INITIAL);
@@ -114,8 +121,8 @@ export default function AdminBatchesPage() {
       try {
         const notifRes = await fetch("/api/notifications?page=1&pageSize=50");
         if (notifRes.ok) {
-          const notifBody = (await notifRes.json()) as { data: { isRead: boolean }[] };
-          setUnread(notifBody.data.filter((n) => !n.isRead).length);
+          const notifBody = (await notifRes.json()) as { unread: number };
+          setUnread(notifBody.unread);
         }
       } catch {
         // Notification badge is best-effort in the local prototype.
@@ -141,25 +148,17 @@ export default function AdminBatchesPage() {
   }, []);
 
   React.useEffect(() => {
-    let cancelled = false;
     const loadData = async () => {
       void load();
     };
     loadData();
-    return () => {
-      cancelled = true;
-    };
   }, [load]);
 
   React.useEffect(() => {
-    let cancelled = false;
     const loadData = async () => {
       void loadBatches(page, pageSize, search);
     };
     loadData();
-    return () => {
-      cancelled = true;
-    };
   }, [loadBatches, page, pageSize, search]);
 
   // ---- Wizard: step 3 loads verified students ----
@@ -183,29 +182,31 @@ export default function AdminBatchesPage() {
     setWizardOpen(true);
   };
 
-  const wizardValidateStep = (step: number): string | null => {
+  const wizardValidateStep = (step: number): boolean => {
+    const errors = { name: "", section: "", academicYear: "", scheduleLabel: "", startTime: "", endTime: "", graceMinutes: "" };
     if (step === 1) {
-      if (wizard.values.name.trim().length < 2) return "Batch name is required.";
-      if (!wizard.values.section.trim()) return "Section is required.";
-      if (!wizard.values.academicYear.trim()) return "Academic year is required.";
+      errors.name = wizard.values.name.trim().length < 2 ? "Batch name must be at least 2 characters." : "";
+      errors.section = wizard.values.section.trim() ? "" : "Section is required.";
+      errors.academicYear = wizard.values.academicYear.trim() ? "" : "Academic year is required.";
     }
     if (step === 2) {
-      if (!wizard.values.scheduleLabel.trim()) return "Schedule label is required.";
-      if (!wizard.values.startTime || !wizard.values.endTime) return "Start and end times are required.";
-      if (wizard.values.endTime <= wizard.values.startTime) return "End time must be after the start time.";
+      errors.scheduleLabel = wizard.values.scheduleLabel.trim() ? "" : "Schedule label is required.";
+      const missingTime = !wizard.values.startTime || !wizard.values.endTime;
+      errors.startTime = missingTime ? "Start and end times are required." : "";
+      errors.endTime = !missingTime && wizard.values.endTime <= wizard.values.startTime
+        ? "End time must be after the start time."
+        : "";
       const grace = Number(wizard.values.graceMinutes);
-      if (!Number.isInteger(grace) || grace < 0) return "Grace minutes must be a whole number of 0 or more.";
+      errors.graceMinutes = !Number.isInteger(grace) || grace < 0
+        ? "Grace minutes must be a whole number of 0 or more."
+        : "";
     }
-    return null;
+    setWizardFieldErrors(errors);
+    return !Object.values(errors).some(Boolean);
   };
 
   const wizardNext = () => {
-    const problem = wizardValidateStep(wizardStep);
-    if (problem) {
-      setWizardError(problem);
-      toast.error(problem);
-      return;
-    }
+    if (!wizardValidateStep(wizardStep)) return;
     setWizardError(null);
     setWizardStep((s) => Math.min(4, s + 1));
   };
@@ -287,18 +288,13 @@ export default function AdminBatchesPage() {
 
   const saveEdit = async () => {
     if (!editing) return;
-    if (editDraft.name.trim().length < 2) {
-      setEditError("Batch name is required.");
-      return;
-    }
-    if (!editDraft.section.trim()) {
-      setEditError("Section is required.");
-      return;
-    }
-    if (!editDraft.academicYear.trim()) {
-      setEditError("Academic year is required.");
-      return;
-    }
+    const errors = {
+      name: editDraft.name.trim().length < 2 ? "Batch name must be at least 2 characters." : "",
+      section: editDraft.section.trim() ? "" : "Section is required.",
+      academicYear: editDraft.academicYear.trim() ? "" : "Academic year is required.",
+    };
+    setEditFieldErrors(errors);
+    if (errors.name || errors.section || errors.academicYear) return;
     setEditBusy(true);
     try {
       const res = await fetch(`/api/admin/batches/${editing.id}`, {
@@ -362,7 +358,7 @@ export default function AdminBatchesPage() {
         </Button>
       }
     >
-      <div className="grid gap-6">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
         {error && (
           <Alert variant="destructive" className="border-destructive/40 bg-destructive/10">
             <CircleAlert />
@@ -371,26 +367,15 @@ export default function AdminBatchesPage() {
           </Alert>
         )}
 
-        <section aria-label="Batch list" className="rounded-xl border border-border bg-card p-4 lg:p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-base font-semibold">Batches</h2>
-            <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-              Search
-              <span className="relative">
-                <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  aria-label="Search batches by name or section"
-                  value={search}
-                  onChange={(e) => {
-                    setPage(1);
-                    setSearch(e.target.value);
-                  }}
-                  placeholder="Name or section —"
-                  className="h-9 rounded-md border border-input bg-background pl-7 pr-2 text-xs"
-                />
-              </span>
-            </label>
-          </div>
+        <section aria-label="Batch list" className="rounded-sm border border-border bg-card p-4 lg:p-5">
+          <DataTableToolbar
+            search={search}
+            onSearchChange={(value) => {
+              setPage(1);
+              setSearch(value);
+            }}
+            searchPlaceholder="Search batch or section..."
+          />
 
           {rows.length === 0 ? (
             <p className="mt-4 text-sm text-muted-foreground">
@@ -398,48 +383,50 @@ export default function AdminBatchesPage() {
             </p>
           ) : (
             <div className="mt-4">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Batch</TableHead>
-                    <TableHead>Section</TableHead>
-                    <TableHead>Academic year</TableHead>
-                    <TableHead>Coordinator</TableHead>
-                    <TableHead>Students</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.map((batch) => (
-                    <TableRow key={batch.id}>
-                      <TableCell className="font-medium">{batch.name}</TableCell>
-                      <TableCell>{batch.section}</TableCell>
-                      <TableCell className="tabular-ledger">{batch.academicYear}</TableCell>
-                      <TableCell>{batch.coordinator?.fullName ?? "—"}</TableCell>
-                      <TableCell className="tabular-ledger">{batch.students.length}</TableCell>
-                      <TableCell className="tabular-ledger">{formatDate(batch.createdAt)}</TableCell>
-                      <TableCell>
-                        <StatusBadge status={batch.isActive ? "ACTIVE" : "DEACTIVATED"} />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap items-center justify-end gap-1.5">
-                          <Button type="button" variant="outline" size="sm" onClick={() => openEdit(batch)}>
-                            <Pencil className="size-3.5" />
-                            Edit
-                          </Button>
-                          <Button type="button" variant="ghost" size="sm" onClick={() => void toggleActive(batch)}>
-                            <Power className="size-3.5" />
-                            {batch.isActive ? "Deactivate" : "Activate"}
-                          </Button>
-                        </div>
-                      </TableCell>
+              <div className="min-w-0 overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Batch</TableHead>
+                      <TableHead>Section</TableHead>
+                      <TableHead>Academic year</TableHead>
+                      <TableHead>Coordinator</TableHead>
+                      <TableHead>Students</TableHead>
+                      <TableHead>Created</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              <div className="mt-3">
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((batch) => (
+                      <TableRow key={batch.id}>
+                        <TableCell className="font-medium">{batch.name}</TableCell>
+                        <TableCell>{batch.section}</TableCell>
+                        <TableCell className="tabular-ledger">{batch.academicYear}</TableCell>
+                        <TableCell>{batch.coordinator?.fullName ?? "—"}</TableCell>
+                        <TableCell className="tabular-ledger">{batch.students.length}</TableCell>
+                        <TableCell className="tabular-ledger">{formatDate(batch.createdAt)}</TableCell>
+                        <TableCell>
+                          <StatusBadge status={batch.isActive ? "ACTIVE" : "DEACTIVATED"} />
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap items-center justify-end gap-1.5">
+                            <Button type="button" variant="ghost" size="sm" onClick={() => openEdit(batch)}>
+                              <Pencil className="size-4" />
+                              Edit
+                            </Button>
+                            <Button type="button" variant="ghost" size="sm" onClick={() => void toggleActive(batch)}>
+                              <PowerOff className="size-4" />
+                              {batch.isActive ? "Deactivate" : "Activate"}
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="mt-3 min-w-0 max-w-full [&_div]:flex-wrap [&_button]:max-w-full [&_button]:whitespace-normal">
                 <DataTablePagination
                   page={page}
                   pageSize={pageSize}
@@ -470,7 +457,7 @@ export default function AdminBatchesPage() {
           </DialogHeader>
 
           {wizard.restoredDraft && wizardStep === 1 && (
-            <Alert className="border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300">
+            <Alert className="border-success-surface/40 bg-success-surface/10 text-success">
               <CheckCircle2 />
               <AlertTitle>Draft restored</AlertTitle>
               <AlertDescription>
@@ -493,33 +480,36 @@ export default function AdminBatchesPage() {
 
           {wizardStep === 1 && (
             <div className="grid gap-3">
-              <div className="grid gap-1.5">
-                <Label htmlFor="wizard-name">Batch name</Label>
-                <Input
-                  id="wizard-name"
-                  value={wizard.values.name}
-                  onChange={(e) => wizard.setValues({ name: e.target.value })}
-                  placeholder="e.g., BSIT-4A Batch 2026-2"
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="wizard-section">Section</Label>
-                <Input
-                  id="wizard-section"
-                  value={wizard.values.section}
-                  onChange={(e) => wizard.setValues({ section: e.target.value })}
-                  placeholder="e.g., BSIT-4A"
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="wizard-year">Academic year</Label>
-                <Input
-                  id="wizard-year"
-                  value={wizard.values.academicYear}
-                  onChange={(e) => wizard.setValues({ academicYear: e.target.value })}
-                  placeholder="e.g., 2026-2027"
-                />
-              </div>
+              <FloatingInput
+                id="wizard-name"
+                label="Batch name"
+                value={wizard.values.name}
+                onChange={(e) => {
+                  wizard.setValues({ name: e.target.value });
+                  setWizardFieldErrors((old) => ({ ...old, name: "" }));
+                }}
+                error={wizardFieldErrors.name}
+              />
+              <FloatingInput
+                id="wizard-section"
+                label="Section"
+                value={wizard.values.section}
+                onChange={(e) => {
+                  wizard.setValues({ section: e.target.value });
+                  setWizardFieldErrors((old) => ({ ...old, section: "" }));
+                }}
+                error={wizardFieldErrors.section}
+              />
+              <FloatingInput
+                id="wizard-year"
+                label="Academic year"
+                value={wizard.values.academicYear}
+                onChange={(e) => {
+                  wizard.setValues({ academicYear: e.target.value });
+                  setWizardFieldErrors((old) => ({ ...old, academicYear: "" }));
+                }}
+                error={wizardFieldErrors.academicYear}
+              />
               <label className="flex min-h-9 items-center gap-2 text-sm">
                 <Checkbox
                   checked={wizard.values.isActive}
@@ -532,15 +522,16 @@ export default function AdminBatchesPage() {
 
           {wizardStep === 2 && (
             <div className="grid gap-3">
-              <div className="grid gap-1.5">
-                <Label htmlFor="wizard-schedule-label">Schedule label</Label>
-                <Input
-                  id="wizard-schedule-label"
-                  value={wizard.values.scheduleLabel}
-                  onChange={(e) => wizard.setValues({ scheduleLabel: e.target.value })}
-                  placeholder="e.g., Weekday Morning Shift"
-                />
-              </div>
+              <FloatingInput
+                id="wizard-schedule-label"
+                label="Schedule label"
+                value={wizard.values.scheduleLabel}
+                onChange={(e) => {
+                  wizard.setValues({ scheduleLabel: e.target.value });
+                  setWizardFieldErrors((old) => ({ ...old, scheduleLabel: "" }));
+                }}
+                error={wizardFieldErrors.scheduleLabel}
+              />
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
                   <Label htmlFor="wizard-start">Shift start</Label>
@@ -548,8 +539,16 @@ export default function AdminBatchesPage() {
                     id="wizard-start"
                     type="time"
                     value={wizard.values.startTime}
-                    onChange={(e) => wizard.setValues({ startTime: e.target.value })}
+                    onChange={(e) => {
+                      wizard.setValues({ startTime: e.target.value });
+                      setWizardFieldErrors((old) => ({ ...old, startTime: "", endTime: "" }));
+                    }}
+                    aria-invalid={Boolean(wizardFieldErrors.startTime)}
+                    aria-describedby={wizardFieldErrors.startTime ? "wizard-start-error" : undefined}
                   />
+                  {wizardFieldErrors.startTime && (
+                    <InlineError message={wizardFieldErrors.startTime} id="wizard-start-error" />
+                  )}
                 </div>
                 <div className="grid gap-1.5">
                   <Label htmlFor="wizard-end">Shift end</Label>
@@ -557,8 +556,16 @@ export default function AdminBatchesPage() {
                     id="wizard-end"
                     type="time"
                     value={wizard.values.endTime}
-                    onChange={(e) => wizard.setValues({ endTime: e.target.value })}
+                    onChange={(e) => {
+                      wizard.setValues({ endTime: e.target.value });
+                      setWizardFieldErrors((old) => ({ ...old, endTime: "" }));
+                    }}
+                    aria-invalid={Boolean(wizardFieldErrors.endTime)}
+                    aria-describedby={wizardFieldErrors.endTime ? "wizard-end-error" : undefined}
                   />
+                  {wizardFieldErrors.endTime && (
+                    <InlineError message={wizardFieldErrors.endTime} id="wizard-end-error" />
+                  )}
                 </div>
               </div>
               <div className="grid gap-1.5">
@@ -568,8 +575,16 @@ export default function AdminBatchesPage() {
                   type="number"
                   min={0}
                   value={wizard.values.graceMinutes}
-                  onChange={(e) => wizard.setValues({ graceMinutes: e.target.value })}
+                  onChange={(e) => {
+                    wizard.setValues({ graceMinutes: e.target.value });
+                    setWizardFieldErrors((old) => ({ ...old, graceMinutes: "" }));
+                  }}
+                  aria-invalid={Boolean(wizardFieldErrors.graceMinutes)}
+                  aria-describedby={wizardFieldErrors.graceMinutes ? "wizard-grace-error" : undefined}
                 />
+                {wizardFieldErrors.graceMinutes && (
+                  <InlineError message={wizardFieldErrors.graceMinutes} id="wizard-grace-error" />
+                )}
               </div>
             </div>
           )}
@@ -609,7 +624,7 @@ export default function AdminBatchesPage() {
           )}
 
           {wizardStep === 4 && (
-            <div className="grid gap-2 rounded-lg border border-border bg-muted/30 p-4 text-sm">
+            <div className="grid gap-2 rounded-sm border border-border bg-muted/30 p-4 text-sm">
               <p>
                 <span className="text-muted-foreground">Batch:</span> {wizard.values.name.trim()} ·{" "}
                 {wizard.values.section.trim()} · {wizard.values.academicYear.trim()} ·{" "}
@@ -667,30 +682,36 @@ export default function AdminBatchesPage() {
             <DialogDescription>Update the batch identity fields. Activation is toggled from the list.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="edit-name">Batch name</Label>
-              <Input
-                id="edit-name"
-                value={editDraft.name}
-                onChange={(e) => setEditDraft((d) => ({ ...d, name: e.target.value }))}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="edit-section">Section</Label>
-              <Input
-                id="edit-section"
-                value={editDraft.section}
-                onChange={(e) => setEditDraft((d) => ({ ...d, section: e.target.value }))}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="edit-year">Academic year</Label>
-              <Input
-                id="edit-year"
-                value={editDraft.academicYear}
-                onChange={(e) => setEditDraft((d) => ({ ...d, academicYear: e.target.value }))}
-              />
-            </div>
+            <FloatingInput
+              id="edit-name"
+              label="Batch name"
+              value={editDraft.name}
+              onChange={(e) => {
+                setEditDraft((d) => ({ ...d, name: e.target.value }));
+                setEditFieldErrors((old) => ({ ...old, name: "" }));
+              }}
+              error={editFieldErrors.name}
+            />
+            <FloatingInput
+              id="edit-section"
+              label="Section"
+              value={editDraft.section}
+              onChange={(e) => {
+                setEditDraft((d) => ({ ...d, section: e.target.value }));
+                setEditFieldErrors((old) => ({ ...old, section: "" }));
+              }}
+              error={editFieldErrors.section}
+            />
+            <FloatingInput
+              id="edit-year"
+              label="Academic year"
+              value={editDraft.academicYear}
+              onChange={(e) => {
+                setEditDraft((d) => ({ ...d, academicYear: e.target.value }));
+                setEditFieldErrors((old) => ({ ...old, academicYear: "" }));
+              }}
+              error={editFieldErrors.academicYear}
+            />
             {editError && (
               <Alert variant="destructive" className="border-destructive/40 bg-destructive/10">
                 <CircleAlert />

@@ -1,3 +1,4 @@
+import { BrandLogo } from "@/components/shell/BrandLogo";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -12,11 +13,11 @@ import { cn } from "cn";
 const CATEGORY_STYLE: Record<string, { label: string; className: string }> = {
   VERIFICATION: {
     label: "Verification",
-    className: "border-blue-500/40 bg-blue-500/12 text-blue-700 dark:text-blue-300",
+    className: "border-info-surface/40 bg-info-surface/12 text-info",
   },
   PASSWORD_RESET: {
     label: "Password Reset",
-    className: "border-amber-500/40 bg-amber-500/12 text-amber-800 dark:text-amber-300",
+    className: "border-warning-surface/40 bg-warning-surface/12 text-warning",
   },
   SECURITY_ALERT: {
     label: "Security Alert",
@@ -55,9 +56,7 @@ export default async function DevOutboxPage() {
       <header className="border-b border-border bg-background">
         <div className="mx-auto flex h-16 w-full max-w-4xl items-center justify-between gap-3 px-4 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary font-mono text-sm font-semibold text-primary-foreground">
-              TT
-            </div>
+            <BrandLogo />
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold tracking-tight">Dev Email Outbox</p>
               <p className="truncate text-[11px] text-muted-foreground">
@@ -80,7 +79,7 @@ export default async function DevOutboxPage() {
       <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-8 lg:px-8">
         <div
           role="note"
-          className="mb-5 flex items-start gap-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3.5 py-3 text-sm text-amber-800 dark:text-amber-300"
+          className="mb-5 flex items-start gap-2.5 rounded-sm border border-warning-surface/40 bg-warning-surface/10 px-3.5 py-3 text-sm text-warning"
         >
           <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
           <span>
@@ -133,7 +132,7 @@ export default async function DevOutboxPage() {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <pre className="whitespace-pre-wrap break-all rounded-lg border border-border bg-muted/50 px-3.5 py-3 font-mono text-xs leading-5 text-foreground">
+                    <pre className="whitespace-pre-wrap break-all rounded-sm border border-border bg-muted/50 px-3.5 py-3 font-mono text-xs leading-5 text-foreground">
                       {email.body}
                     </pre>
                   </CardContent>

@@ -9,6 +9,7 @@ import { writeAuditLog } from "@/lib/audit";
 const markReadSchema = z.object({
   ids: z.array(z.string().uuid()).optional(),
   id: z.string().uuid().optional(),
+  all: z.boolean().optional(),
 });
 
 export async function GET(req: Request) {
@@ -20,18 +21,21 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const { page, pageSize, skip, take } = normalizePagination(url.searchParams.get("page"), url.searchParams.get("pageSize"));
+  const unreadOnly = url.searchParams.get("unreadOnly") === "true";
+  const where = { userId: user.id, ...(unreadOnly ? { isRead: false } : {}) };
 
-  const [items, total] = await db.$transaction([
+  const [items, unread, total] = await db.$transaction([
     db.notification.findMany({
-      where: { userId: user.id },
+      where,
       orderBy: { createdAt: "desc" },
       skip,
       take,
     }),
-    db.notification.count({ where: { userId: user.id } }),
+    db.notification.count({ where: { userId: user.id, isRead: false } }),
+    db.notification.count({ where }),
   ]);
 
-  return NextResponse.json({ data: items, page, pageSize, total, totalPages: Math.ceil(total / pageSize) });
+  return NextResponse.json({ data: items, page, pageSize, total, unread, totalPages: Math.ceil(total / pageSize) });
 }
 
 export async function PATCH(req: Request) {
@@ -53,7 +57,22 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: parse.error.issues[0]?.message ?? "Invalid input" }, { status: 400 });
   }
 
-  const { ids, id } = parse.data;
+  const { ids, id, all } = parse.data;
+  if (all) {
+    const result = await db.notification.updateMany({
+      where: { userId: user.id, isRead: false },
+      data: { isRead: true },
+    });
+    await writeAuditLog({
+      actorId: user.id,
+      action: "NOTIFICATIONS_MARK_READ",
+      entityType: "Notification",
+      entityId: "multiple",
+      details: { count: result.count },
+    });
+    return NextResponse.json({ markedRead: result.count }, { status: 200 });
+  }
+
   const targetIds = ids ?? (id ? [id] : []);
   if (targetIds.length === 0) {
     return NextResponse.json({ error: "No notification ids provided" }, { status: 400 });

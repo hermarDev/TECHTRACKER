@@ -32,7 +32,6 @@ export async function GET(req: Request) {
   await cookies();
   const auth = await requireApiSession(["SUPERADMIN"]);
   if (!auth.ok) return auth.response;
-  const { user } = auth;
 
   const url = new URL(req.url);
   const { page, pageSize, skip, take } = normalizePagination(

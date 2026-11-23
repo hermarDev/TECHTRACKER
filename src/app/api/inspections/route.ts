@@ -25,7 +25,6 @@ export async function GET(req: Request) {
   await cookies();
   const auth = await requireApiSession();
   if (!auth.ok) return auth.response;
-  const { user } = auth;
 
   const url = new URL(req.url);
   const { page, pageSize, skip, take } = normalizePagination(url.searchParams.get("page"), url.searchParams.get("pageSize"));

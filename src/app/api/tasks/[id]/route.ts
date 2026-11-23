@@ -15,7 +15,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
   const visibleAssignments = auth.user.role === "STUDENT"
     ? task.assignments.filter((assignment) => assignment.studentId === auth.user.id).map((assignment) => ({ ...assignment, remarks: assignment.remarks.filter(isStudentVisibleRemark) }))
     : auth.user.role === "ADMIN"
-      ? task.assignments.filter((assignment) => task.createdById === auth.user.id)
+      ? (task.createdById === auth.user.id ? task.assignments : [])
       : task.assignments;
   if (visibleAssignments.length === 0) return NextResponse.json({ error: "Task not found." }, { status: 404 });
   return NextResponse.json({ task: { ...task, assignments: visibleAssignments } });

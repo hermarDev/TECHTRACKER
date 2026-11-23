@@ -4,7 +4,6 @@ import { createOpaqueToken, hashPassword } from "@/lib/auth";
 import { registerSchema } from "@/lib/validation";
 import { queueEmailOutbox, writeAuditLog } from "@/lib/audit";
 
-const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 1000;
 
 function appOrigin(request: Request): string {
   const configured = process.env.NEXT_PUBLIC_APP_URL;

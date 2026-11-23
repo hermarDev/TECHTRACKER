@@ -1,5 +1,6 @@
 "use client";
 
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import * as React from "react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -29,7 +30,9 @@ import { AppShell } from "@/components/shell/AppShell";
 import { StatusBadge } from "@/components/shell/StatusBadge";
 import { DataTablePagination } from "@/components/shell/DataTablePagination";
 import { PasswordInput } from "@/components/shell/PasswordInput";
-import { Button } from "@/components/ui/button";
+import { FloatingInput } from "@/components/shell/FloatingInput";
+import { InlineError } from "@/components/shell/InlineError";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -52,7 +55,6 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 
-const PAGE_SIZES = [15, 25, 50] as const;
 
 type AdminRow = {
   id: string;
@@ -170,10 +172,12 @@ function AdminsPanel() {
   const [createOpen, setCreateOpen] = React.useState(false);
   const [createDraft, setCreateDraft] = React.useState({ fullName: "", email: "", password: "", phone: "" });
   const [createError, setCreateError] = React.useState<string | null>(null);
+  const [createFieldErrors, setCreateFieldErrors] = React.useState({ fullName: "", email: "", password: "" });
   const [createBusy, setCreateBusy] = React.useState(false);
   const [editing, setEditing] = React.useState<AdminRow | null>(null);
   const [editDraft, setEditDraft] = React.useState({ fullName: "", email: "", phone: "" });
   const [editError, setEditError] = React.useState<string | null>(null);
+  const [editFieldErrors, setEditFieldErrors] = React.useState({ fullName: "" });
   const [editBusy, setEditBusy] = React.useState(false);
 
   const load = React.useCallback(async (targetPage: number, targetSize: number) => {
@@ -190,20 +194,20 @@ function AdminsPanel() {
   }, [search, statusFilter]);
 
   React.useEffect(() => {
-    let cancelled = false;
     const loadData = async () => {
       void load(page, pageSize);
     };
     loadData();
-    return () => {
-      cancelled = true;
-    };
   }, [load, page, pageSize]);
 
   const createAdmin = async () => {
-    if (createDraft.fullName.trim().length < 2) return setCreateError("Full name is required.");
-    if (!createDraft.email.trim()) return setCreateError("Email address is required.");
-    if (createDraft.password.length < 8) return setCreateError("Password must be at least 8 characters.");
+    const fieldErrors = {
+      fullName: createDraft.fullName.trim().length < 2 ? "Full name must be at least 2 characters." : "",
+      email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(createDraft.email.trim()) ? "" : "Enter a valid email address.",
+      password: createDraft.password.length < 8 ? "Password must be at least 8 characters." : "",
+    };
+    setCreateFieldErrors(fieldErrors);
+    if (fieldErrors.fullName || fieldErrors.email || fieldErrors.password) return;
     setCreateBusy(true);
     setCreateError(null);
     const { ok, body } = await jsonFetch<{ admin: AdminRow }>("/api/superadmin/admins", {
@@ -222,6 +226,7 @@ function AdminsPanel() {
       return;
     }
     toast.success(`Admin account for ${createDraft.fullName.trim()} created.`);
+    setCreateFieldErrors({ fullName: "", email: "", password: "" });
     setCreateOpen(false);
     setCreateDraft({ fullName: "", email: "", password: "", phone: "" });
     void load(page, pageSize);
@@ -229,7 +234,9 @@ function AdminsPanel() {
 
   const saveEdit = async () => {
     if (!editing) return;
-    if (editDraft.fullName.trim().length < 2) return setEditError("Full name is required.");
+    const fullNameError = editDraft.fullName.trim().length < 2 ? "Full name must be at least 2 characters." : "";
+    setEditFieldErrors({ fullName: fullNameError });
+    if (fullNameError) return;
     setEditBusy(true);
     setEditError(null);
     const { ok, body } = await jsonFetch<{ admin: AdminRow }>("/api/superadmin/admins", {
@@ -248,6 +255,7 @@ function AdminsPanel() {
       return;
     }
     toast.success("Admin account details saved.");
+    setEditFieldErrors({ fullName: "" });
     setEditing(null);
     void load(page, pageSize);
   };
@@ -268,15 +276,15 @@ function AdminsPanel() {
   };
 
   return (
-    <div className="grid gap-4">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="flex items-center gap-2 text-base font-semibold">
           <UserCog className="size-4 text-muted-foreground" />
           Coordinator (Admin) accounts
         </h3>
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-xs text-muted-foreground [&>span]:min-w-0 [&>span]:max-w-full [&_input]:min-w-0 [&_input]:max-w-full [&_select]:min-w-0 [&_select]:max-w-full">
           <span className="relative">
-            <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2" />
+            <Search className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2" />
             <input
               aria-label="Search admins"
               value={search}
@@ -284,96 +292,103 @@ function AdminsPanel() {
                 setPage(1);
                 setSearch(e.target.value);
               }}
-              placeholder="Name or email —"
+              placeholder="Search name or email..."
               className="h-9 rounded-md border border-input bg-background pl-7 pr-2 text-xs"
             />
           </span>
-          <select
-            aria-label="Filter admin status"
-            value={statusFilter}
-            onChange={(e) => {
+          <Select
+            value={statusFilter || "ALL"}
+            onValueChange={(value) => {
               setPage(1);
-              setStatusFilter(e.target.value);
+              setStatusFilter(value === "ALL" ? "" : (value ?? ""));
             }}
-            className="h-9 rounded-md border border-input bg-background px-2 text-xs"
           >
-            <option value="">All statuses</option>
-            <option value="ACTIVE">Active</option>
-            <option value="DEACTIVATED">Deactivated</option>
-          </select>
+            <SelectTrigger size="sm" className="w-36" aria-label="Filter admin status">
+              <SelectValue placeholder="All statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All statuses</SelectItem>
+              <SelectItem value="ACTIVE">Active</SelectItem>
+              <SelectItem value="DEACTIVATED">Deactivated</SelectItem>
+            </SelectContent>
+          </Select>
           <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="size-3.5" />
+            <Plus className="size-4" />
             New Admin
           </Button>
         </div>
       </div>
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Admin</TableHead>
-            <TableHead>Batches</TableHead>
-            <TableHead>Rooms</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Since</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((admin) => (
-            <TableRow key={admin.id}>
-              <TableCell>
-                <p className="font-medium">{admin.fullName}</p>
-                <p className="text-xs text-muted-foreground">{admin.email}</p>
-              </TableCell>
-              <TableCell className="tabular-ledger">{admin.coordinatedBatches}</TableCell>
-              <TableCell className="tabular-ledger">{admin.assignedRooms}</TableCell>
-              <TableCell>
-                <StatusBadge status={admin.status} />
-              </TableCell>
-              <TableCell className="tabular-ledger">{formatDateTime(admin.createdAt)}</TableCell>
-              <TableCell>
-                <div className="flex flex-wrap items-center justify-end gap-1.5">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setEditing(admin);
-                      setEditDraft({ fullName: admin.fullName, email: admin.email, phone: admin.phone ?? "" });
-                      setEditError(null);
-                    }}
-                  >
-                    <Pencil className="size-3.5" />
-                    Edit
-                  </Button>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => void toggleStatus(admin)}>
-                    <Power className="size-3.5" />
-                    {admin.status === "ACTIVE" ? "Deactivate" : "Activate"}
-                  </Button>
-                </div>
-              </TableCell>
-            </TableRow>
-          ))}
-          {rows.length === 0 && (
+      <div className="min-w-0 overflow-x-auto">
+        <Table>
+          <TableHeader>
             <TableRow>
-              <TableCell colSpan={6} className="text-sm text-muted-foreground">
-                No admin accounts matched.
-              </TableCell>
+              <TableHead>Admin</TableHead>
+              <TableHead>Batches</TableHead>
+              <TableHead>Rooms</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Since</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
-          )}
-        </TableBody>
-      </Table>
-      <DataTablePagination
-        page={page}
-        pageSize={pageSize}
-        total={total}
-        onPageChange={setPage}
-        onPageSizeChange={(size) => {
-          setPage(1);
-          setPageSize(size);
-        }}
-      />
+          </TableHeader>
+          <TableBody>
+            {rows.map((admin) => (
+              <TableRow key={admin.id}>
+                <TableCell>
+                  <p className="font-medium">{admin.fullName}</p>
+                  <p className="text-xs text-muted-foreground">{admin.email}</p>
+                </TableCell>
+                <TableCell className="tabular-ledger">{admin.coordinatedBatches}</TableCell>
+                <TableCell className="tabular-ledger">{admin.assignedRooms}</TableCell>
+                <TableCell>
+                  <StatusBadge status={admin.status} />
+                </TableCell>
+                <TableCell className="tabular-ledger">{formatDateTime(admin.createdAt)}</TableCell>
+                <TableCell>
+                  <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setEditing(admin);
+                        setEditDraft({ fullName: admin.fullName, email: admin.email, phone: admin.phone ?? "" });
+                        setEditError(null);
+                      }}
+                    >
+                      <Pencil className="size-4" />
+                      Edit
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => void toggleStatus(admin)}>
+                      <Power className="size-4" />
+                      {admin.status === "ACTIVE" ? "Deactivate" : "Activate"}
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+            {rows.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} className="text-sm text-muted-foreground">
+                  No admin accounts matched.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="min-w-0 max-w-full [&_div]:flex-wrap [&_button]:max-w-full [&_button]:whitespace-normal">
+        <DataTablePagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => {
+            setPage(1);
+            setPageSize(size);
+          }}
+        />
+      </div>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="sm:max-w-md max-h-[90dvh] overflow-y-auto">
@@ -382,42 +397,34 @@ function AdminsPanel() {
             <DialogDescription>Coordinator accounts sign in with the credentials defined here.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="admin-fullname">Full name</Label>
-              <Input
-                id="admin-fullname"
-                value={createDraft.fullName}
-                onChange={(e) => setCreateDraft((d) => ({ ...d, fullName: e.target.value }))}
-                placeholder="Official staff name —"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="admin-email">Email</Label>
-              <Input
-                id="admin-email"
-                type="email"
-                value={createDraft.email}
-                onChange={(e) => setCreateDraft((d) => ({ ...d, email: e.target.value }))}
-                placeholder="name@aclc-mandaue.edu.ph"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="admin-password">Temporary password</Label>
-              <PasswordInput
-                id="admin-password"
-                value={createDraft.password}
-                onChange={(e) => setCreateDraft((d) => ({ ...d, password: e.target.value }))}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="admin-phone">Phone (optional)</Label>
-              <Input
-                id="admin-phone"
-                value={createDraft.phone}
-                onChange={(e) => setCreateDraft((d) => ({ ...d, phone: e.target.value }))}
-                placeholder="Contact number —"
-              />
-            </div>
+            <FloatingInput
+              id="admin-fullname"
+              label="Full name"
+              value={createDraft.fullName}
+              onChange={(e) => setCreateDraft((d) => ({ ...d, fullName: e.target.value }))}
+              error={createFieldErrors.fullName}
+            />
+            <FloatingInput
+              id="admin-email"
+              label="Email"
+              type="email"
+              value={createDraft.email}
+              onChange={(e) => setCreateDraft((d) => ({ ...d, email: e.target.value }))}
+              error={createFieldErrors.email}
+            />
+            <PasswordInput
+              id="admin-password"
+              label="Temporary password"
+              value={createDraft.password}
+              onChange={(e) => setCreateDraft((d) => ({ ...d, password: e.target.value }))}
+              error={createFieldErrors.password}
+            />
+            <FloatingInput
+              id="admin-phone"
+              label="Phone (optional)"
+              value={createDraft.phone}
+              onChange={(e) => setCreateDraft((d) => ({ ...d, phone: e.target.value }))}
+            />
             {createError && (
               <Alert variant="destructive" className="border-destructive/40 bg-destructive/10">
                 <CircleAlert />
@@ -445,31 +452,26 @@ function AdminsPanel() {
             <DialogDescription>Status toggling is a separate action from the account list.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="edit-admin-name">Full name</Label>
-              <Input
-                id="edit-admin-name"
-                value={editDraft.fullName}
-                onChange={(e) => setEditDraft((d) => ({ ...d, fullName: e.target.value }))}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="edit-admin-email">Email</Label>
-              <Input
-                id="edit-admin-email"
-                type="email"
-                value={editDraft.email}
-                onChange={(e) => setEditDraft((d) => ({ ...d, email: e.target.value }))}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="edit-admin-phone">Phone</Label>
-              <Input
-                id="edit-admin-phone"
-                value={editDraft.phone}
-                onChange={(e) => setEditDraft((d) => ({ ...d, phone: e.target.value }))}
-              />
-            </div>
+            <FloatingInput
+              id="edit-admin-name"
+              label="Full name"
+              value={editDraft.fullName}
+              onChange={(e) => setEditDraft((d) => ({ ...d, fullName: e.target.value }))}
+              error={editFieldErrors.fullName}
+            />
+            <FloatingInput
+              id="edit-admin-email"
+              label="Email"
+              type="email"
+              value={editDraft.email}
+              onChange={(e) => setEditDraft((d) => ({ ...d, email: e.target.value }))}
+            />
+            <FloatingInput
+              id="edit-admin-phone"
+              label="Phone"
+              value={editDraft.phone}
+              onChange={(e) => setEditDraft((d) => ({ ...d, phone: e.target.value }))}
+            />
             {editError && (
               <Alert variant="destructive" className="border-destructive/40 bg-destructive/10">
                 <CircleAlert />
@@ -509,6 +511,8 @@ function ConfigPanel() {
   const [rounding, setRounding] = React.useState("EXACT_MINUTES");
   const [selfReg, setSelfReg] = React.useState(true);
   const [categoriesText, setCategoriesText] = React.useState("");
+  const [hoursError, setHoursError] = React.useState("");
+  const [categoriesError, setCategoriesError] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
@@ -529,18 +533,15 @@ function ConfigPanel() {
 
   const save = async () => {
     const parsedHours = Number(hours);
-    if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
-      setError("Required Pre-OJT hours must be a positive number.");
-      return;
-    }
+    const invalidHours = !Number.isInteger(parsedHours) || parsedHours < 1 || parsedHours > 1000;
+    setHoursError(invalidHours ? "Enter a whole number of hours between 1 and 1000." : "");
+    if (invalidHours) return;
     const categories = categoriesText
       .split(",")
       .map((c) => c.trim())
       .filter((c) => c.length > 0);
-    if (categories.length === 0) {
-      setError("At least one task category is required.");
-      return;
-    }
+    setCategoriesError(categories.length === 0 ? "At least one task category is required." : "");
+    if (categories.length === 0) return;
     setBusy(true);
     setError(null);
     const { ok, body } = await jsonFetch<{ config: Config }>("/api/superadmin/config", {
@@ -589,24 +590,30 @@ function ConfigPanel() {
           min={1}
           max={1000}
           value={hours}
-          onChange={(e) => setHours(e.target.value)}
+          onChange={(e) => {
+            setHours(e.target.value);
+            setHoursError("");
+          }}
           className="max-w-40 tabular-ledger"
+          aria-invalid={Boolean(hoursError)}
+          aria-describedby={hoursError ? "config-hours-error" : undefined}
         />
+        {hoursError && <InlineError message={hoursError} id="config-hours-error" />}
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="config-rounding">Credit rounding rule</Label>
-        <select
-          id="config-rounding"
-          value={rounding}
-          onChange={(e) => setRounding(e.target.value)}
-          className="h-10 max-w-xs rounded-md border border-input bg-background px-2 text-sm"
-        >
-          {ROUNDING_RULES.map((rule) => (
-            <option key={rule.value} value={rule.value}>
-              {rule.label}
-            </option>
-          ))}
-        </select>
+        <Select value={rounding} onValueChange={(value) => setRounding(value ?? "")}>
+          <SelectTrigger id="config-rounding" className="w-full max-w-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {ROUNDING_RULES.map((rule) => (
+              <SelectItem key={rule.value} value={rule.value}>
+                {rule.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       <label className="flex min-h-9 max-w-xs items-center gap-2 text-sm">
         <Checkbox checked={selfReg} onCheckedChange={(checked) => setSelfReg(checked === true)} />
@@ -619,8 +626,11 @@ function ConfigPanel() {
           value={categoriesText}
           onChange={(e) => setCategoriesText(e.target.value)}
           className="min-h-24"
-          placeholder="PC Assembly, OS Configuration, Network Cabling —"
+          placeholder="PC Assembly, OS Configuration, Network Cabling"
+          aria-invalid={Boolean(categoriesError)}
+          aria-describedby={categoriesError ? "config-categories-error" : undefined}
         />
+        {categoriesError && <InlineError message={categoriesError} id="config-categories-error" />}
       </div>
       <div>
         <Button type="button" onClick={() => void save()} disabled={busy}>
@@ -652,7 +662,7 @@ function BatchesPanel() {
   }, []);
 
   return (
-    <div className="grid gap-4">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
       <h3 className="flex items-center gap-2 text-base font-semibold">
         <Layers className="size-4 text-muted-foreground" />
         Batch & schedule inspection (all batches, A–Z roster of record)
@@ -664,41 +674,43 @@ function BatchesPanel() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Batch</TableHead>
-            <TableHead>Section</TableHead>
-            <TableHead>Academic year</TableHead>
-            <TableHead>Coordinator</TableHead>
-            <TableHead>Students</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Created</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((batch) => (
-            <TableRow key={batch.id}>
-              <TableCell className="font-medium">{batch.name}</TableCell>
-              <TableCell>{batch.section}</TableCell>
-              <TableCell className="tabular-ledger">{batch.academicYear}</TableCell>
-              <TableCell>{batch.coordinator?.fullName ?? "—"}</TableCell>
-              <TableCell className="tabular-ledger">{batch.students.length}</TableCell>
-              <TableCell>
-                <StatusBadge status={batch.isActive ? "ACTIVE" : "DEACTIVATED"} />
-              </TableCell>
-              <TableCell className="tabular-ledger">{formatDateTime(batch.createdAt)}</TableCell>
-            </TableRow>
-          ))}
-          {rows.length === 0 && (
+      <div className="min-w-0 overflow-x-auto">
+        <Table>
+          <TableHeader>
             <TableRow>
-              <TableCell colSpan={7} className="text-sm text-muted-foreground">
-                No batches exist yet.
-              </TableCell>
+              <TableHead>Batch</TableHead>
+              <TableHead>Section</TableHead>
+              <TableHead>Academic year</TableHead>
+              <TableHead>Coordinator</TableHead>
+              <TableHead>Students</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Created</TableHead>
             </TableRow>
-          )}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {rows.map((batch) => (
+              <TableRow key={batch.id}>
+                <TableCell className="font-medium">{batch.name}</TableCell>
+                <TableCell>{batch.section}</TableCell>
+                <TableCell className="tabular-ledger">{batch.academicYear}</TableCell>
+                <TableCell>{batch.coordinator?.fullName ?? "—"}</TableCell>
+                <TableCell className="tabular-ledger">{batch.students.length}</TableCell>
+                <TableCell>
+                  <StatusBadge status={batch.isActive ? "ACTIVE" : "DEACTIVATED"} />
+                </TableCell>
+                <TableCell className="tabular-ledger">{formatDateTime(batch.createdAt)}</TableCell>
+              </TableRow>
+            ))}
+            {rows.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={7} className="text-sm text-muted-foreground">
+                  No batches exist yet.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
       <p className="text-xs text-muted-foreground">
         Scheduling edits remain with the coordinating admin in Batch & Schedule Management; this console view is
         read-only.
@@ -723,6 +735,7 @@ function EscalationsPanel() {
   const [ruling, setRuling] = React.useState<EscalationRow | null>(null);
   const [rulingStatus, setRulingStatus] = React.useState<string>("APPROVED");
   const [rulingNote, setRulingNote] = React.useState("");
+  const [rulingNoteError, setRulingNoteError] = React.useState("");
   const [rulingError, setRulingError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
@@ -742,22 +755,19 @@ function EscalationsPanel() {
   }, [statusFilter, sourceFilter]);
 
   React.useEffect(() => {
-    let cancelled = false;
     const loadData = async () => {
       void load(page, pageSize);
     };
     loadData();
-    return () => {
-      cancelled = true;
-    };
   }, [load, page, pageSize]);
 
   const submitRuling = async () => {
     if (!ruling) return;
     if (rulingNote.trim().length === 0) {
-      setRulingError("A written ruling note is mandatory.");
+      setRulingNoteError("A written ruling note is mandatory.");
       return;
     }
+    setRulingNoteError("");
     setBusy(true);
     setRulingError(null);
     const { ok, body } = await jsonFetch<{ escalation: EscalationRow }>("/api/superadmin/escalations", {
@@ -777,117 +787,127 @@ function EscalationsPanel() {
   };
 
   return (
-    <div className="grid gap-4">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="flex items-center gap-2 text-base font-semibold">
           <Gavel className="size-4 text-muted-foreground" />
           Flagged attendance & escalation rulings
         </h3>
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <select
-            aria-label="Filter by ruling status"
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-xs text-muted-foreground [&>span]:min-w-0 [&>span]:max-w-full [&_input]:min-w-0 [&_input]:max-w-full [&_select]:min-w-0 [&_select]:max-w-full">
+          <Select
             value={statusFilter}
-            onChange={(e) => {
+            onValueChange={(value) => {
               setPage(1);
-              setStatusFilter(e.target.value);
+              setStatusFilter(value ?? "");
             }}
-            className="h-9 rounded-md border border-input bg-background px-2 text-xs"
           >
-            {RULING_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s === "OPEN" ? "Open cases" : s === "APPROVED" ? "Approved" : s === "UPHELD" ? "Upheld" : "Dismissed"}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label="Filter by source"
-            value={sourceFilter}
-            onChange={(e) => {
+            <SelectTrigger size="sm" className="w-36" aria-label="Filter by ruling status">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {RULING_STATUSES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s === "OPEN" ? "Open cases" : s === "APPROVED" ? "Approved" : s === "UPHELD" ? "Upheld" : "Dismissed"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={sourceFilter || "ALL"}
+            onValueChange={(value) => {
               setPage(1);
-              setSourceFilter(e.target.value);
+              setSourceFilter(value === "ALL" ? "" : (value ?? ""));
             }}
-            className="h-9 rounded-md border border-input bg-background px-2 text-xs"
           >
-            <option value="">All sources</option>
-            <option value="ATTENDANCE">Attendance</option>
-            <option value="TASK_REVIEW">Task review</option>
-          </select>
+            <SelectTrigger size="sm" className="w-36" aria-label="Filter by source">
+              <SelectValue placeholder="All sources" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All sources</SelectItem>
+              <SelectItem value="ATTENDANCE">Attendance</SelectItem>
+              <SelectItem value="TASK_REVIEW">Task review</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Case</TableHead>
-            <TableHead>Student</TableHead>
-            <TableHead>Raised by</TableHead>
-            <TableHead>Filed</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="text-right">Action</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((row) => (
-            <TableRow key={row.id}>
-              <TableCell>
-                <p className="font-medium">{row.summary}</p>
-                <p className="text-xs text-muted-foreground">
-                  {row.sourceType === "ATTENDANCE" ? "Attendance escalation" : "Task review escalation"}
-                </p>
-              </TableCell>
-              <TableCell>
-                <p>{row.student.fullName}</p>
-                <p className="text-xs tabular-ledger text-muted-foreground">{row.student.studentIdNo ?? "—"}</p>
-              </TableCell>
-              <TableCell>{row.raisedBy?.fullName ?? "—"}</TableCell>
-              <TableCell className="tabular-ledger">{formatDateTime(row.createdAt)}</TableCell>
-              <TableCell>
-                <StatusBadge status={row.status} />
-              </TableCell>
-              <TableCell>
-                <div className="flex justify-end">
-                  {row.status === "OPEN" ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => {
-                        setRuling(row);
-                        setRulingStatus("APPROVED");
-                        setRulingNote("");
-                        setRulingError(null);
-                      }}
-                    >
-                      <Gavel className="size-3.5" />
-                      Rule on case
-                    </Button>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">
-                      {row.rulingNote ? `“${row.rulingNote.slice(0, 48)}${row.rulingNote.length > 48 ? "…" : ""}”` : "—"}
-                    </span>
-                  )}
-                </div>
-              </TableCell>
-            </TableRow>
-          ))}
-          {rows.length === 0 && (
+      <div className="min-w-0 overflow-x-auto">
+        <Table>
+          <TableHeader>
             <TableRow>
-              <TableCell colSpan={6} className="text-sm text-muted-foreground">
-                No escalation cases matched the current filters.
-              </TableCell>
+              <TableHead>Case</TableHead>
+              <TableHead>Student</TableHead>
+              <TableHead>Raised by</TableHead>
+              <TableHead>Filed</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="text-right">Action</TableHead>
             </TableRow>
-          )}
-        </TableBody>
-      </Table>
-      <DataTablePagination
-        page={page}
-        pageSize={pageSize}
-        total={total}
-        onPageChange={setPage}
-        onPageSizeChange={(size) => {
-          setPage(1);
-          setPageSize(size);
-        }}
-      />
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={row.id}>
+                <TableCell>
+                  <p className="font-medium">{row.summary}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {row.sourceType === "ATTENDANCE" ? "Attendance escalation" : "Task review escalation"}
+                  </p>
+                </TableCell>
+                <TableCell>
+                  <p>{row.student.fullName}</p>
+                  <p className="font-mono text-xs tabular-ledger text-muted-foreground">{row.student.studentIdNo ?? "—"}</p>
+                </TableCell>
+                <TableCell>{row.raisedBy?.fullName ?? "—"}</TableCell>
+                <TableCell className="tabular-ledger">{formatDateTime(row.createdAt)}</TableCell>
+                <TableCell>
+                  <StatusBadge status={row.status} />
+                </TableCell>
+                <TableCell>
+                  <div className="flex justify-end">
+                    {row.status === "OPEN" ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => {
+                          setRuling(row);
+                          setRulingStatus("APPROVED");
+                          setRulingNote("");
+                          setRulingError(null);
+                        }}
+                      >
+                        <Gavel className="size-4" />
+                        Rule on case
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        {row.rulingNote ? `“${row.rulingNote.slice(0, 48)}${row.rulingNote.length > 48 ? "…" : ""}”` : "—"}
+                      </span>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+            {rows.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} className="text-sm text-muted-foreground">
+                  No escalation cases matched the current filters.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="min-w-0 max-w-full [&_div]:flex-wrap [&_button]:max-w-full [&_button]:whitespace-normal">
+        <DataTablePagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => {
+            setPage(1);
+            setPageSize(size);
+          }}
+        />
+      </div>
 
       <Dialog open={ruling !== null} onOpenChange={(open) => !open && setRuling(null)}>
         <DialogContent className="sm:max-w-lg max-h-[90dvh] overflow-y-auto">
@@ -900,7 +920,7 @@ function EscalationsPanel() {
           </DialogHeader>
           {ruling && (
             <div className="grid gap-3">
-              <div className="grid gap-1 rounded-lg border border-border bg-muted/30 p-3 text-sm">
+              <div className="grid gap-1 rounded-sm border border-border bg-muted/30 p-3 text-sm">
                 <p className="font-medium">{ruling.summary}</p>
                 <p className="text-xs text-muted-foreground">{ruling.policyDetails}</p>
                 <p className="text-xs text-muted-foreground">
@@ -931,10 +951,16 @@ function EscalationsPanel() {
                 <Textarea
                   id="ruling-note"
                   value={rulingNote}
-                  onChange={(e) => setRulingNote(e.target.value)}
-                  placeholder="Written basis for this ruling —"
+                  onChange={(e) => {
+                    setRulingNote(e.target.value);
+                    setRulingNoteError("");
+                  }}
+                  placeholder="Written basis for this ruling"
                   className="min-h-24"
+                  aria-invalid={Boolean(rulingNoteError)}
+                  aria-describedby={rulingNoteError ? "ruling-note-error" : undefined}
                 />
+                {rulingNoteError && <InlineError message={rulingNoteError} id="ruling-note-error" />}
               </div>
               {rulingError && (
                 <Alert variant="destructive" className="border-destructive/40 bg-destructive/10">
@@ -993,14 +1019,10 @@ function AuditPanel() {
   }, [search, entityFilter]);
 
   React.useEffect(() => {
-    let cancelled = false;
     const loadData = async () => {
       void load(page, pageSize);
     };
     loadData();
-    return () => {
-      cancelled = true;
-    };
   }, [load, page, pageSize]);
 
   const exportCsv = async () => {
@@ -1048,15 +1070,15 @@ function AuditPanel() {
   };
 
   return (
-    <div className="grid gap-4">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="flex items-center gap-2 text-base font-semibold">
           <ScrollText className="size-4 text-muted-foreground" />
           Full system audit trail
         </h3>
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-xs text-muted-foreground [&>span]:min-w-0 [&>span]:max-w-full [&_input]:min-w-0 [&_input]:max-w-full [&_select]:min-w-0 [&_select]:max-w-full">
           <span className="relative">
-            <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2" />
+            <Search className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2" />
             <input
               aria-label="Search audit log"
               value={search}
@@ -1064,75 +1086,82 @@ function AuditPanel() {
                 setPage(1);
                 setSearch(e.target.value);
               }}
-              placeholder="Action, entity, actor —"
+              placeholder="Search action, entity, or actor..."
               className="h-9 rounded-md border border-input bg-background pl-7 pr-2 text-xs"
             />
           </span>
-          <select
-            aria-label="Filter by entity type"
-            value={entityFilter}
-            onChange={(e) => {
+          <Select
+            value={entityFilter || "ALL"}
+            onValueChange={(value) => {
               setPage(1);
-              setEntityFilter(e.target.value);
+              setEntityFilter(value === "ALL" ? "" : (value ?? ""));
             }}
-            className="h-9 rounded-md border border-input bg-background px-2 text-xs"
           >
-            <option value="">All entity types</option>
-            {entityTypes.map((type) => (
-              <option key={type} value={type}>
-                {type}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger size="sm" className="w-44" aria-label="Filter by entity type">
+              <SelectValue placeholder="All entity types" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All entity types</SelectItem>
+              {entityTypes.map((type) => (
+                <SelectItem key={type} value={type}>
+                  {type}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button type="button" variant="outline" size="sm" onClick={() => void exportCsv()} disabled={exporting}>
-            <FileDown className="size-3.5" />
+            <FileDown className="size-4" />
             {exporting ? "Exporting…" : "Export CSV"}
           </Button>
         </div>
       </div>
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>When</TableHead>
-            <TableHead>Actor</TableHead>
-            <TableHead>Action</TableHead>
-            <TableHead>Entity</TableHead>
-            <TableHead>Entity ID</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((row) => (
-            <TableRow key={row.id}>
-              <TableCell className="tabular-ledger">{formatDateTime(row.createdAt)}</TableCell>
-              <TableCell>
-                <p>{row.actor?.fullName ?? "System"}</p>
-                <p className="text-xs text-muted-foreground">{row.actor?.role ?? "—"}</p>
-              </TableCell>
-              <TableCell className="font-mono text-xs">{row.action}</TableCell>
-              <TableCell>{row.entityType}</TableCell>
-              <TableCell className="font-mono text-xs">{row.entityId}</TableCell>
-            </TableRow>
-          ))}
-          {rows.length === 0 && (
+      <div className="min-w-0 overflow-x-auto">
+        <Table>
+          <TableHeader>
             <TableRow>
-              <TableCell colSpan={5} className="text-sm text-muted-foreground">
-                No audit entries matched the search.
-              </TableCell>
+              <TableHead>When</TableHead>
+              <TableHead>Actor</TableHead>
+              <TableHead>Action</TableHead>
+              <TableHead>Entity</TableHead>
+              <TableHead>Entity ID</TableHead>
             </TableRow>
-          )}
-        </TableBody>
-      </Table>
-      <DataTablePagination
-        page={page}
-        pageSize={pageSize}
-        total={total}
-        onPageChange={setPage}
-        onPageSizeChange={(size) => {
-          setPage(1);
-          setPageSize(size);
-        }}
-      />
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={row.id}>
+                <TableCell className="tabular-ledger">{formatDateTime(row.createdAt)}</TableCell>
+                <TableCell>
+                  <p>{row.actor?.fullName ?? "System"}</p>
+                  <p className="text-xs text-muted-foreground">{row.actor?.role ?? "—"}</p>
+                </TableCell>
+                <TableCell className="font-mono text-xs">{row.action}</TableCell>
+                <TableCell>{row.entityType}</TableCell>
+                <TableCell className="font-mono text-xs">{row.entityId}</TableCell>
+              </TableRow>
+            ))}
+            {rows.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="text-sm text-muted-foreground">
+                  No audit entries matched the search.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="min-w-0 max-w-full [&_div]:flex-wrap [&_button]:max-w-full [&_button]:whitespace-normal">
+        <DataTablePagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => {
+            setPage(1);
+            setPageSize(size);
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -1159,6 +1188,9 @@ function RoomsPanel() {
   const [createOpen, setCreateOpen] = React.useState(false);
   const [createDraft, setCreateDraft] = React.useState({ name: "", building: "", capacity: "40", unitLines: "" });
   const [createError, setCreateError] = React.useState<string | null>(null);
+  const [createFieldErrors, setCreateFieldErrors] = React.useState({ name: "", building: "", capacity: "" });
+  const [editFieldErrors, setEditFieldErrors] = React.useState({ name: "", capacity: "" });
+  const [unitCodeError, setUnitCodeError] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [editingRoom, setEditingRoom] = React.useState<Room | null>(null);
   const [editDraft, setEditDraft] = React.useState({ name: "", building: "", capacity: "40", isActive: true, unitLines: "" });
@@ -1177,21 +1209,22 @@ function RoomsPanel() {
   }, []);
 
   React.useEffect(() => {
-    let cancelled = false;
     const loadData = async () => {
       void load();
     };
     loadData();
-    return () => {
-      cancelled = true;
-    };
   }, [load]);
 
   const createRoom = async () => {
-    if (createDraft.name.trim().length < 2) return setCreateError("Room name is required.");
-    if (!createDraft.building.trim()) return setCreateError("Building is required.");
+    const fieldErrors = {
+      name: createDraft.name.trim().length < 2 ? "Room name must be at least 2 characters." : "",
+      building: createDraft.building.trim() ? "" : "Building is required.",
+      capacity: "",
+    };
     const capacity = Number(createDraft.capacity);
-    if (!Number.isInteger(capacity) || capacity < 1) return setCreateError("Capacity must be a positive number.");
+    if (!Number.isInteger(capacity) || capacity < 1) fieldErrors.capacity = "Capacity must be a positive whole number.";
+    setCreateFieldErrors(fieldErrors);
+    if (fieldErrors.name || fieldErrors.building || fieldErrors.capacity) return;
     const units = parseUnitLines(createDraft.unitLines);
     setBusy(true);
     setCreateError(null);
@@ -1211,6 +1244,7 @@ function RoomsPanel() {
       return;
     }
     toast.success(`Lab room ${createDraft.name.trim()} created with ${units.length || "no"} unit(s).`);
+    setCreateFieldErrors({ name: "", building: "", capacity: "" });
     setCreateOpen(false);
     setCreateDraft({ name: "", building: "", capacity: "40", unitLines: "" });
     void load();
@@ -1218,9 +1252,14 @@ function RoomsPanel() {
 
   const saveRoom = async () => {
     if (!editingRoom) return;
-    if (editDraft.name.trim().length < 2) return setEditError("Room name is required.");
+    const fieldErrors = {
+      name: editDraft.name.trim().length < 2 ? "Room name must be at least 2 characters." : "",
+      capacity: "",
+    };
     const capacity = Number(editDraft.capacity);
-    if (!Number.isInteger(capacity) || capacity < 1) return setEditError("Capacity must be a positive number.");
+    if (!Number.isInteger(capacity) || capacity < 1) fieldErrors.capacity = "Capacity must be a positive whole number.";
+    setEditFieldErrors(fieldErrors);
+    if (fieldErrors.name || fieldErrors.capacity) return;
     setBusy(true);
     setEditError(null);
     const newUnits = parseUnitLines(editDraft.unitLines);
@@ -1242,13 +1281,18 @@ function RoomsPanel() {
       return;
     }
     toast.success(`Lab room ${editDraft.name.trim()} saved.`);
+    setEditFieldErrors({ name: "", capacity: "" });
     setEditingRoom(null);
     void load();
   };
 
   const saveUnit = async () => {
     if (!editUnit) return;
-    if (unitDraft.unitCode.trim().length < 1) return setUnitError("Unit code is required.");
+    if (!unitDraft.unitCode.trim()) {
+      setUnitCodeError("Unit code is required.");
+      return;
+    }
+    setUnitCodeError("");
     setBusy(true);
     setUnitError(null);
     const { ok, body } = await jsonFetch<{ unit: RoomUnit }>("/api/superadmin/rooms", {
@@ -1267,6 +1311,7 @@ function RoomsPanel() {
       return;
     }
     toast.success(`Unit ${unitDraft.unitCode.trim()} configuration saved.`);
+    setUnitCodeError("");
     setEditUnit(null);
     void load();
   };
@@ -1277,14 +1322,14 @@ function RoomsPanel() {
   });
 
   return (
-    <div className="grid gap-4">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="flex items-center gap-2 text-base font-semibold">
           <Laptop className="size-4 text-muted-foreground" />
           Lab rooms & units (A–Z)
         </h3>
         <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
-          <Plus className="size-3.5" />
+          <Plus className="size-4" />
           New Room
         </Button>
       </div>
@@ -1300,7 +1345,7 @@ function RoomsPanel() {
         {rooms.map((room) => {
           const counts = conditionCounts(room);
           return (
-            <article key={room.id} className="rounded-xl border border-border bg-card p-4">
+            <article key={room.id} className="rounded-sm border border-border bg-card p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="font-semibold">{room.name}</p>
@@ -1327,13 +1372,13 @@ function RoomsPanel() {
                       setEditError(null);
                     }}
                   >
-                    <Pencil className="size-3.5" />
+                    <Pencil className="size-4" />
                     Configure
                   </Button>
                 </div>
               </div>
               {room.units.length > 0 && (
-                <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+                <div className="mt-3 min-w-0 max-w-full overflow-x-auto rounded-sm border border-border">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -1365,7 +1410,7 @@ function RoomsPanel() {
                                   setUnitError(null);
                                 }}
                               >
-                                <Pencil className="size-3.5" />
+                                <Pencil className="size-4" />
                                 Edit
                               </Button>
                             </div>
@@ -1384,7 +1429,7 @@ function RoomsPanel() {
           );
         })}
         {rooms.length === 0 && (
-          <p className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">
+          <p className="rounded-sm border border-border bg-card p-6 text-sm text-muted-foreground">
             No lab rooms configured yet.
           </p>
         )}
@@ -1399,35 +1444,30 @@ function RoomsPanel() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="room-name">Room name</Label>
-              <Input
-                id="room-name"
-                value={createDraft.name}
-                onChange={(e) => setCreateDraft((d) => ({ ...d, name: e.target.value }))}
-                placeholder="e.g., Computer Lab 3"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="room-building">Building</Label>
-              <Input
-                id="room-building"
-                value={createDraft.building}
-                onChange={(e) => setCreateDraft((d) => ({ ...d, building: e.target.value }))}
-                placeholder="Campus building —"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="room-capacity">Capacity</Label>
-              <Input
-                id="room-capacity"
-                type="number"
-                min={1}
-                value={createDraft.capacity}
-                onChange={(e) => setCreateDraft((d) => ({ ...d, capacity: e.target.value }))}
-                className="tabular-ledger"
-              />
-            </div>
+            <FloatingInput
+              id="room-name"
+              label="Room name"
+              value={createDraft.name}
+              onChange={(e) => setCreateDraft((d) => ({ ...d, name: e.target.value }))}
+              error={createFieldErrors.name}
+            />
+            <FloatingInput
+              id="room-building"
+              label="Building"
+              value={createDraft.building}
+              onChange={(e) => setCreateDraft((d) => ({ ...d, building: e.target.value }))}
+              error={createFieldErrors.building}
+            />
+            <FloatingInput
+              id="room-capacity"
+              label="Capacity"
+              type="number"
+              min={1}
+              value={createDraft.capacity}
+              onChange={(e) => setCreateDraft((d) => ({ ...d, capacity: e.target.value }))}
+              className="tabular-ledger"
+              error={createFieldErrors.capacity}
+            />
             <div className="grid gap-1.5">
               <Label htmlFor="room-units">Unit codes (one per line)</Label>
               <Textarea
@@ -1467,33 +1507,29 @@ function RoomsPanel() {
           </DialogHeader>
           {editingRoom && (
             <div className="grid gap-3">
-              <div className="grid gap-1.5">
-                <Label htmlFor="edit-room-name">Room name</Label>
-                <Input
-                  id="edit-room-name"
-                  value={editDraft.name}
-                  onChange={(e) => setEditDraft((d) => ({ ...d, name: e.target.value }))}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="edit-room-building">Building</Label>
-                <Input
-                  id="edit-room-building"
-                  value={editDraft.building}
-                  onChange={(e) => setEditDraft((d) => ({ ...d, building: e.target.value }))}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="edit-room-capacity">Capacity</Label>
-                <Input
-                  id="edit-room-capacity"
-                  type="number"
-                  min={1}
-                  value={editDraft.capacity}
-                  onChange={(e) => setEditDraft((d) => ({ ...d, capacity: e.target.value }))}
-                  className="tabular-ledger"
-                />
-              </div>
+              <FloatingInput
+                id="edit-room-name"
+                label="Room name"
+                value={editDraft.name}
+                onChange={(e) => setEditDraft((d) => ({ ...d, name: e.target.value }))}
+                error={editFieldErrors.name}
+              />
+              <FloatingInput
+                id="edit-room-building"
+                label="Building"
+                value={editDraft.building}
+                onChange={(e) => setEditDraft((d) => ({ ...d, building: e.target.value }))}
+              />
+              <FloatingInput
+                id="edit-room-capacity"
+                label="Capacity"
+                type="number"
+                min={1}
+                value={editDraft.capacity}
+                onChange={(e) => setEditDraft((d) => ({ ...d, capacity: e.target.value }))}
+                className="tabular-ledger"
+                error={editFieldErrors.capacity}
+              />
               <label className="flex min-h-9 items-center gap-2 text-sm">
                 <Checkbox checked={editDraft.isActive} onCheckedChange={(checked) => setEditDraft((d) => ({ ...d, isActive: checked === true }))} />
                 Room is active for inspection
@@ -1537,35 +1573,35 @@ function RoomsPanel() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="unit-code">Unit code</Label>
-              <Input
-                id="unit-code"
-                value={unitDraft.unitCode}
-                onChange={(e) => setUnitDraft((d) => ({ ...d, unitCode: e.target.value }))}
-                className="font-mono"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="unit-specs">Specs</Label>
-              <Input
-                id="unit-specs"
-                value={unitDraft.specs}
-                onChange={(e) => setUnitDraft((d) => ({ ...d, specs: e.target.value }))}
-              />
-            </div>
+            <FloatingInput
+              id="unit-code"
+              label="Unit code"
+              value={unitDraft.unitCode}
+              onChange={(e) => setUnitDraft((d) => ({ ...d, unitCode: e.target.value }))}
+              className="tabular-ledger"
+              error={unitCodeError}
+            />
+            <FloatingInput
+              id="unit-specs"
+              label="Specs"
+              value={unitDraft.specs}
+              onChange={(e) => setUnitDraft((d) => ({ ...d, specs: e.target.value }))}
+            />
             <div className="grid gap-1.5">
               <Label htmlFor="unit-condition">Condition</Label>
-              <select
-                id="unit-condition"
+              <Select
                 value={unitDraft.condition}
-                onChange={(e) => setUnitDraft((d) => ({ ...d, condition: e.target.value }))}
-                className="h-10 rounded-md border border-input bg-background px-2 text-sm"
+                onValueChange={(value) => setUnitDraft((d) => ({ ...d, condition: value ?? "" }))}
               >
-                <option value="FUNCTIONING">Functioning</option>
-                <option value="NEEDS_MAINTENANCE">Needs Maintenance</option>
-                <option value="NEEDS_REPAIR">Needs Repair</option>
-              </select>
+                <SelectTrigger id="unit-condition" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="FUNCTIONING">Functioning</SelectItem>
+                  <SelectItem value="NEEDS_MAINTENANCE">Needs Maintenance</SelectItem>
+                  <SelectItem value="NEEDS_REPAIR">Needs Repair</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             {unitError && (
               <Alert variant="destructive" className="border-destructive/40 bg-destructive/10">
@@ -1602,7 +1638,7 @@ function AlertsPanel({ overview }: { overview: Overview | null }) {
         <BellRing className="size-4 text-muted-foreground" />
         System alerts
       </h3>
-      <Alert className="border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300">
+      <Alert className="border-success-surface/40 bg-success-surface/10 text-success">
         <MessageSquareOff />
         <AlertTitle>Alerts only — no chat access</AlertTitle>
         <AlertDescription>
@@ -1611,28 +1647,28 @@ function AlertsPanel({ overview }: { overview: Overview | null }) {
         </AlertDescription>
       </Alert>
       <div className="grid gap-3 sm:grid-cols-3">
-        <div className="rounded-xl border border-border bg-card p-4">
+        <div className="rounded-sm border border-border bg-card p-4">
           <p className="text-xs text-muted-foreground">Unread alert notifications</p>
           <p className="text-2xl font-semibold tabular-ledger">{overview?.unreadNotifications ?? "—"}</p>
         </div>
-        <div className="rounded-xl border border-border bg-card p-4">
+        <div className="rounded-sm border border-border bg-card p-4">
           <p className="text-xs text-muted-foreground">Open escalations</p>
           <p className="text-2xl font-semibold tabular-ledger">{openEscalations ?? "—"}</p>
         </div>
-        <div className="rounded-xl border border-border bg-card p-4">
+        <div className="rounded-sm border border-border bg-card p-4">
           <p className="text-xs text-muted-foreground">Inspections on record</p>
           <p className="text-2xl font-semibold tabular-ledger">{overview?.inspectionCount ?? "—"}</p>
         </div>
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" render={<Link href="/notifications" />}>
+        <Link href="/notifications" className={buttonVariants()}>
           <BellRing className="size-4" />
           Open notifications inbox
-        </Button>
-        <Button type="button" variant="outline" render={<Link href="/admin/attendance" />}>
+        </Link>
+        <Link href="/admin/attendance" className={buttonVariants({ variant: "outline" })}>
           <ListChecks className="size-4" />
           Flagged attendance queue
-        </Button>
+        </Link>
       </div>
     </div>
   );
@@ -1663,8 +1699,8 @@ export default function SuperAdminPage() {
         try {
           const notifRes = await fetch("/api/notifications?page=1&pageSize=50");
           if (notifRes.ok) {
-            const notifBody = (await notifRes.json()) as { data: { isRead: boolean }[] };
-            setUnread(notifBody.data.filter((n) => !n.isRead).length);
+            const notifBody = (await notifRes.json()) as { unread: number };
+            setUnread(notifBody.unread);
           }
         } catch {
           // Notification badge is best-effort in the local prototype.
@@ -1708,7 +1744,7 @@ export default function SuperAdminPage() {
       title="SuperAdmin Console"
       subtitle="Executive oversight — accounts, rules, escalations, audit, and lab configuration"
     >
-      <div className="grid gap-6">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
         {error && (
           <Alert variant="destructive" className="border-destructive/40 bg-destructive/10">
             <CircleAlert />
@@ -1728,7 +1764,7 @@ export default function SuperAdminPage() {
           ].map((card) => {
             const Icon = card.icon;
             return (
-              <article key={card.label} className="grid gap-1 rounded-xl border border-border bg-card p-4">
+              <article key={card.label} className="grid gap-1 rounded-sm border border-border bg-card p-4">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Icon className="size-4" aria-hidden="true" />
                   {card.label}
@@ -1745,7 +1781,7 @@ export default function SuperAdminPage() {
               const Icon = meta.icon;
               return (
                 <TabsTrigger key={meta.value} value={meta.value} className="px-3">
-                  <Icon className="size-3.5" />
+                  <Icon className="size-4" />
                   {meta.label}
                 </TabsTrigger>
               );
@@ -1753,7 +1789,7 @@ export default function SuperAdminPage() {
           </TabsList>
         </Tabs>
 
-        <section aria-label="Subsystem workspace" className="rounded-xl border border-border bg-card p-4 lg:p-5">
+        <section aria-label="Subsystem workspace" className="rounded-sm border border-border bg-card p-4 lg:p-5">
           {tab === "admins" && <AdminsPanel />}
           {tab === "config" && <ConfigPanel />}
           {tab === "batches" && <BatchesPanel />}

@@ -3,13 +3,20 @@
 import * as React from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { CheckCircle2, CircleAlert, FileDown, FileText, Wrench } from "lucide-react";
+import { CheckCircle2, CircleAlert, ClipboardList, FileDown, FileText, Wrench } from "lucide-react";
 import type { Role } from "@prisma/client";
 
 import { AppShell } from "@/components/shell/AppShell";
 import { StatusBadge } from "@/components/shell/StatusBadge";
 import { DataTablePagination } from "@/components/shell/DataTablePagination";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Table,
@@ -70,16 +77,18 @@ export default function InspectionsPage() {
         return;
       }
       const me = (await meRes.json()) as { user: { id: string; fullName: string; email: string; role: Role } };
-      setUser(me.user);
       if (roomsRes.ok) {
         const body = (await roomsRes.json()) as { rooms: Room[] };
         setRooms(body.rooms);
+      } else {
+        setError("Laboratory rooms could not be loaded. Please retry.");
       }
+      setUser(me.user);
       try {
         const notifRes = await fetch("/api/notifications?page=1&pageSize=50");
         if (notifRes.ok) {
-          const notifBody = (await notifRes.json()) as { data: { isRead: boolean }[] };
-          setUnread(notifBody.data.filter((n) => !n.isRead).length);
+          const notifBody = (await notifRes.json()) as { unread: number };
+          setUnread(notifBody.unread);
         }
       } catch {
         // Notification badge is best-effort in the local prototype.
@@ -113,25 +122,17 @@ export default function InspectionsPage() {
   );
 
   React.useEffect(() => {
-    let cancelled = false;
     const loadData = async () => {
       void load();
     };
     loadData();
-    return () => {
-      cancelled = true;
-    };
   }, [load]);
 
   React.useEffect(() => {
-    let cancelled = false;
     const loadData = async () => {
       void loadInspections(page, pageSize, statusFilter);
     };
     loadData();
-    return () => {
-      cancelled = true;
-    };
   }, [loadInspections, page, pageSize, statusFilter]);
 
   const review = async (id: string) => {
@@ -165,7 +166,7 @@ export default function InspectionsPage() {
       title="Lab Unit Inspections"
       subtitle="Room-by-unit condition audits — Functioning, Needs Maintenance, Needs Repair"
     >
-      <div className="grid gap-6">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
         {error && (
           <Alert variant="destructive" className="border-destructive/40 bg-destructive/10">
             <CircleAlert />
@@ -175,7 +176,7 @@ export default function InspectionsPage() {
         )}
 
         {/* 09W — Room selection, sorted A–Z by the API */}
-        <section aria-labelledby="rooms-heading" className="grid gap-3">
+        <section aria-labelledby="rooms-heading" className="grid grid-cols-[minmax(0,1fr)] gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 id="rooms-heading" className="text-base font-semibold">
               Laboratory rooms <span className="text-muted-foreground">(A–Z)</span>
@@ -185,12 +186,12 @@ export default function InspectionsPage() {
             </p>
           </div>
           {rooms.length === 0 ? (
-            <p className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">
+            <p className="rounded-sm border border-border bg-card p-6 text-sm text-muted-foreground">
               No laboratory rooms are assigned yet. Coordinate with the Pre-OJT office to get a room
               assignment.
             </p>
           ) : (
-            <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <ul className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {rooms.map((room) => {
                 const functioning = room.units.filter((u) => u.condition === "FUNCTIONING").length;
                 const maintenance = room.units.filter((u) => u.condition === "NEEDS_MAINTENANCE").length;
@@ -198,7 +199,7 @@ export default function InspectionsPage() {
                 return (
                   <li
                     key={room.id}
-                    className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4"
+                    className="flex flex-col gap-3 rounded-sm border border-border bg-card p-4 [&_a]:max-w-full [&_a]:whitespace-normal"
                   >
                     <div>
                       <p className="font-semibold">{room.name}</p>
@@ -208,26 +209,34 @@ export default function InspectionsPage() {
                       {room.units.length} workstation unit{room.units.length === 1 ? "" : "s"}
                     </p>
                     <div className="flex flex-wrap gap-1.5 text-xs">
-                      <span className="rounded-full border border-emerald-500/35 bg-emerald-500/12 px-2 py-0.5 text-emerald-700 dark:text-emerald-300">
+                      <span className="rounded-full border border-success-surface/35 bg-success-surface/12 px-2 py-0.5 text-success">
                         {functioning} functioning
                       </span>
-                      <span className="rounded-full border border-amber-500/40 bg-amber-500/12 px-2 py-0.5 text-amber-800 dark:text-amber-300">
+                      <span
+                        className={
+                          maintenance === 0
+                            ? "rounded-full border border-border px-2 py-0.5 text-muted-foreground"
+                            : "rounded-full border border-warning-surface/40 bg-warning-surface/12 px-2 py-0.5 text-warning"
+                        }
+                      >
                         {maintenance} maintenance
                       </span>
-                      <span className="rounded-full border border-destructive/45 bg-destructive/12 px-2 py-0.5 text-destructive">
+                      <span
+                        className={
+                          repair === 0
+                            ? "rounded-full border border-border px-2 py-0.5 text-muted-foreground"
+                            : "rounded-full border border-destructive/45 bg-destructive/12 px-2 py-0.5 text-destructive"
+                        }
+                      >
                         {repair} repair
                       </span>
                     </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="w-fit"
-                      render={<Link href={`/inspections/${room.id}`} />}
-                    >
-                      <Wrench className="size-4" />
-                      Open unit checklist
-                    </Button>
+                    <div className="flex justify-end border-t border-border pt-3">
+                      <Link href={`/inspections/${room.id}`} className={buttonVariants({ variant: "outline", size: "sm" })}>
+                        <Wrench className="size-4" />
+                        Open unit checklist
+                      </Link>
+                    </div>
                   </li>
                 );
               })}
@@ -236,35 +245,42 @@ export default function InspectionsPage() {
         </section>
 
         {/* 09W — Recent inspection submissions */}
-        <section aria-labelledby="recent-heading" className="rounded-xl border border-border bg-card p-4 lg:p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <section aria-labelledby="recent-heading" className="rounded-sm border border-border bg-card p-4 lg:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 [&>label]:min-w-0 [&>label]:max-w-full [&_select]:min-w-0 [&_select]:max-w-full">
             <h2 id="recent-heading" className="text-base font-semibold">
               Recent inspections
             </h2>
-            <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
               Status
-              <select
-                aria-label="Filter by status"
-                value={statusFilter}
-                onChange={(e) => {
+              <Select
+                value={statusFilter || "ALL"}
+                onValueChange={(value) => {
                   setPage(1);
-                  setStatusFilter(e.target.value);
+                  setStatusFilter(value === "ALL" ? "" : (value ?? ""));
                 }}
-                className="h-9 rounded-md border border-input bg-background px-2 text-xs text-foreground"
               >
-                <option value="">All statuses</option>
-                <option value="SUBMITTED">Submitted</option>
-                <option value="REVIEWED">Reviewed</option>
-              </select>
-            </label>
+                <SelectTrigger size="sm" className="w-32" aria-label="Filter by status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All statuses</SelectItem>
+                  <SelectItem value="SUBMITTED">Submitted</SelectItem>
+                  <SelectItem value="REVIEWED">Reviewed</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {rows.length === 0 ? (
-            <p className="mt-4 text-sm text-muted-foreground">
-              No inspections recorded yet. Open a room checklist above to submit the first audit.
-            </p>
+            <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+              <ClipboardList className="size-8 text-muted-foreground" aria-hidden="true" />
+              <p className="text-sm font-medium">No inspections recorded yet</p>
+              <p className="text-sm text-muted-foreground">
+                Open a room checklist above to submit the first audit.
+              </p>
+            </div>
           ) : (
-            <div className="mt-4">
+            <div className="mt-4 min-w-0 overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -294,28 +310,14 @@ export default function InspectionsPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-wrap items-center justify-end gap-1.5">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              render={
-                                <a href={`/api/inspections/${row.id}/export?format=csv`} download />
-                              }
-                            >
-                              <FileDown className="size-3.5" />
+                            <a href={`/api/inspections/${row.id}/export?format=csv`} download className={buttonVariants({ variant: "outline", size: "sm" })}>
+                              <FileDown className="size-4" />
                               CSV
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              render={
-                                <a href={`/api/inspections/${row.id}/export?format=pdf`} download />
-                              }
-                            >
-                              <FileText className="size-3.5" />
+                            </a>
+                            <a href={`/api/inspections/${row.id}/export?format=pdf`} download className={buttonVariants({ variant: "outline", size: "sm" })}>
+                              <FileText className="size-4" />
                               PDF
-                            </Button>
+                            </a>
                             {canReview && row.status === "SUBMITTED" && (
                               <Button
                                 type="button"
@@ -323,7 +325,7 @@ export default function InspectionsPage() {
                                 disabled={busyId === row.id}
                                 onClick={() => void review(row.id)}
                               >
-                                <CheckCircle2 className="size-3.5" />
+                                <CheckCircle2 className="size-4" />
                                 {busyId === row.id ? "Marking…" : "Admin Review"}
                               </Button>
                             )}
@@ -335,7 +337,7 @@ export default function InspectionsPage() {
                 </TableBody>
               </Table>
 
-              <div className="mt-3">
+              <div className="mt-3 min-w-0 max-w-full [&_div]:flex-wrap [&_button]:max-w-full [&_button]:whitespace-normal">
                 <DataTablePagination
                   page={page}
                   pageSize={pageSize}

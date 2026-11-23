@@ -1,5 +1,6 @@
 "use client";
 
+import { BrandLogo } from "@/components/shell/BrandLogo";
 import * as React from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -7,7 +8,6 @@ import { toast } from "sonner";
 import { CheckCircle2, CircleAlert, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/shell/PasswordInput";
 
 function ResetPasswordForm() {
@@ -19,14 +19,10 @@ function ResetPasswordForm() {
   const [success, setSuccess] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!token) {
-      const message = "Missing reset token. Open the link from your password reset email.";
-      setError(message);
-      toast.error(message);
-      return;
-    }
+    if (!token) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -61,9 +57,7 @@ function ResetPasswordForm() {
     <div className="flex min-h-screen flex-1 items-center justify-center bg-muted/40 px-4 py-10">
       <div className="w-full max-w-md space-y-6">
         <div className="text-center">
-          <div className="mx-auto flex size-12 items-center justify-center rounded-lg bg-primary font-mono text-base font-semibold text-primary-foreground">
-            TT
-          </div>
+          <BrandLogo className="mx-auto size-12" />
           <h1 className="mt-4 text-2xl font-semibold tracking-tight">Set a New Password</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Password reset — ACLC College of Mandaue BSIT Pre-OJT
@@ -81,7 +75,7 @@ function ResetPasswordForm() {
             {success ? (
               <div
                 role="status"
-                className="flex items-start gap-2.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3.5 py-3 text-sm text-emerald-700 dark:text-emerald-300"
+                className="flex items-start gap-2.5 rounded-sm border border-success-surface/40 bg-success-surface/10 px-3.5 py-3 text-sm text-success"
               >
                 <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                 <div className="space-y-1">
@@ -100,7 +94,7 @@ function ResetPasswordForm() {
                 {error && (
                   <div
                     role="alert"
-                    className="mb-4 flex items-start gap-2.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
+                    className="mb-4 flex items-start gap-2.5 rounded-sm border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
                   >
                     <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                     <span>{error}</span>
@@ -109,37 +103,31 @@ function ResetPasswordForm() {
                 {token === null && (
                   <div
                     role="alert"
-                    className="mb-4 flex items-start gap-2.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
+                    className="mb-4 flex items-start gap-2.5 rounded-sm border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
                   >
                     <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                     <span>Missing reset token. Open the link from your password reset email.</span>
                   </div>
                 )}
                 <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-                  <div className="space-y-2">
-                    <Label htmlFor="password">New password</Label>
-                    <PasswordInput
-                      id="password"
-                      required
-                      autoComplete="new-password"
-                      placeholder="At least 8 characters"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      aria-invalid={Boolean(error)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="confirmPassword">Confirm new password</Label>
-                    <PasswordInput
-                      id="confirmPassword"
-                      required
-                      autoComplete="new-password"
-                      placeholder="Re-enter your new password"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      aria-invalid={Boolean(error)}
-                    />
-                  </div>
+                  <PasswordInput
+                    id="password"
+                    required
+                    autoComplete="new-password"
+                    label="New password (at least 8 characters)"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    aria-invalid={Boolean(error)}
+                  />
+                  <PasswordInput
+                    id="confirmPassword"
+                    required
+                    autoComplete="new-password"
+                    label="Confirm new password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    aria-invalid={Boolean(error)}
+                  />
                   <Button type="submit" className="h-11 w-full gap-2 text-base" disabled={submitting}>
                     <KeyRound className="size-4" aria-hidden="true" />
                     <span>{submitting ? "Updating..." : "Update password"}</span>

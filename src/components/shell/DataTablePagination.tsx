@@ -28,44 +28,37 @@ export function DataTablePagination({
         <span className="tabular-ledger">
           Showing {start}–{end} of {total}
         </span>
-        <label className="inline-flex items-center gap-1.5">
+        <div className="inline-flex items-center gap-1.5">
           <span>Rows:</span>
-          <select
-            aria-label="Rows per page"
-            value={pageSize}
-            onChange={(e) => onPageSizeChange(Number(e.target.value))}
-            className="h-9 rounded-md border border-input bg-background px-2 text-xs text-foreground"
-          >
-            <option value={15}>15</option>
-            <option value={25}>25</option>
-            <option value={50}>50</option>
+          <select aria-label="Rows per page" value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))} className="min-h-11 rounded-sm border border-input bg-background px-2 text-foreground sm:min-h-8">
+            <option value={15}>15</option><option value={25}>25</option><option value={50}>50</option>
           </select>
-        </label>
+        </div>
       </div>
       <div className="flex items-center gap-2">
         <Button
           type="button"
           variant="outline"
-          size="sm"
-          className="min-h-9"
+          size="icon"
+          className="size-11 sm:size-9"
+          aria-label="Previous page"
           disabled={page <= 1}
           onClick={() => onPageChange(page - 1)}
         >
           <ChevronLeft className="size-4" />
-          Previous
         </Button>
-        <span className="px-2 text-xs tabular-ledger text-muted-foreground">
+        <span className="px-1 text-xs tabular-ledger text-muted-foreground">
           Page {page} / {totalPages}
         </span>
         <Button
           type="button"
           variant="outline"
-          size="sm"
-          className="min-h-9"
+          size="icon"
+          className="size-11 sm:size-9"
+          aria-label="Next page"
           disabled={page >= totalPages}
           onClick={() => onPageChange(page + 1)}
         >
-          Next
           <ChevronRight className="size-4" />
         </Button>
       </div>

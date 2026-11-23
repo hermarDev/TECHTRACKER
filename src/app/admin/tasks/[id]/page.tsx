@@ -1,3 +1,5 @@
+/* Authenticated and local preview images bypass the Next image optimizer. */
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import * as React from "react";
@@ -5,55 +7,54 @@ import { useParams } from "next/navigation";
 import { AppShell } from "@/components/shell/AppShell";
 import { StatusBadge } from "@/components/shell/StatusBadge";
 import { toast } from "sonner";
-import { Loader2, File, Image as ImageIcon, Download, X, Upload, Eye, MessageSquare, CheckCircle2, CircleAlert, Edit, AlertTriangle } from "lucide-react";
+import { File, Image as ImageIcon, CheckCircle2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { InlineError } from "@/components/shell/InlineError";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 
 type User = { id: string; fullName: string; email: string; role: "ADMIN" | "SUPERADMIN" };
-type Submission = { 
-  id: string; 
-  version: number; 
-  summary: string; 
+type Submission = {
+  id: string;
+  version: number;
+  summary: string;
   attachmentKeys: string[];
   submittedAt: string;
 };
 type Remark = { body: string; visibility: string; author: { fullName: string }; createdAt: string };
-type Assignment = { 
-  id: string; 
-  status: string; 
-  student: { id: string; fullName: string }; 
+type Assignment = {
+  id: string;
+  status: string;
+  student: { id: string; fullName: string; studentIdNo?: string | null };
   submissions: Submission[];
   remarks: Remark[];
   startedAt?: string | null;
   acceptedAt?: string | null;
 };
-type Task = { 
-  title: string; 
-  instructions: string; 
-  category: string; 
-  deadline: string; 
+type Task = {
+  title: string;
+  instructions: string;
+  category: string;
+  deadline: string;
   createdById: string;
-  assignments: Assignment[] 
+  assignments: Assignment[]
 };
 
 export default function AdminTaskDetailPage() {
   const params = useParams<{ id: string }>();
   const [user, setUser] = React.useState<User | null>(null);
   const [task, setTask] = React.useState<Task | null>(null);
-  const [isLoading, setIsLoading] = React.useState(true);
   const [remarks, setRemarks] = React.useState<Record<string, string>>({});
+  const [remarkErrors, setRemarkErrors] = React.useState<Record<string, string>>({});
   const [notes, setNotes] = React.useState<Record<string, string>>({});
   const [previewImage, setPreviewImage] = React.useState<string | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = React.useState(false);
 
   const load = React.useCallback(async () => {
-    setIsLoading(true);
     try {
       const [me, result] = await Promise.all([
         fetch("/api/auth/me"),
@@ -63,8 +64,6 @@ export default function AdminTaskDetailPage() {
       if (result.ok) setTask((await result.json()).task);
     } catch {
       toast.error("Failed to load task");
-    } finally {
-      setIsLoading(false);
     }
   }, [params.id]);
 
@@ -78,7 +77,6 @@ export default function AdminTaskDetailPage() {
       if (mounted) {
         if (me.ok) setUser((await me.json()).user);
         if (result.ok) setTask((await result.json()).task);
-        setIsLoading(false);
       }
     };
     doLoad();
@@ -88,10 +86,15 @@ export default function AdminTaskDetailPage() {
   const review = async (assignmentId: string, status: "ACCEPTED" | "RETURNED") => {
     const studentRemark = remarks[assignmentId] ?? "";
     const internalNote = notes[assignmentId] ?? "";
-    
+
     if (status === "RETURNED" && !studentRemark.trim()) {
-      return toast.error("Student-visible return remarks are mandatory.");
+      setRemarkErrors((old) => ({
+        ...old,
+        [assignmentId]: "Student-visible return remarks are mandatory.",
+      }));
+      return;
     }
+    setRemarkErrors((old) => ({ ...old, [assignmentId]: "" }));
 
     try {
       const response = await fetch(`/api/tasks/${params.id}/review`, {
@@ -122,45 +125,31 @@ export default function AdminTaskDetailPage() {
     <AppShell user={user} title={task.title} subtitle="Student-visible return remarks and private staff notes.">
       <div className="space-y-4">
         {task.assignments.map((assignment) => (
-          <article key={assignment.id} className="rounded-xl border border-border bg-card">
+          <article key={assignment.id} className="rounded-sm border border-border bg-card p-4 lg:p-5">
             <CardContent className="space-y-4">
               <div className="flex justify-between items-start">
                 <div>
                   <h2 className="font-semibold">{assignment.student.fullName}</h2>
-                  <p className="text-sm text-muted-foreground">Student ID: {assignment.student.id}</p>
+                  <p className="font-mono text-xs tabular-ledger text-muted-foreground">Student ID: {assignment.student.studentIdNo ?? "—"}</p>
                 </div>
-                <Badge 
-                  variant={
-                    assignment.status === "ACCEPTED" ? "default" :
-                    assignment.status === "RETURNED" ? "destructive" :
-                    assignment.status === "SUBMITTED" ? "secondary" :
-                    "outline"
-                  }
-                  className={
-                    assignment.status === "ACCEPTED" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" :
-                    assignment.status === "RETURNED" ? "bg-destructive/10 text-destructive" :
-                    ""
-                  }
-                >
-                  {assignment.status.replace("_", " ")}
-                </Badge>
+                <StatusBadge status={assignment.status} />
               </div>
 
               <Separator />
 
               <div className="space-y-2">
                 <p className="font-medium">Latest Submission</p>
-                <div className="rounded-lg border bg-muted p-4">
+                <div className="rounded-sm border bg-muted p-4">
                   {assignment.submissions.length > 0 ? (
                     <>
                       <p className="whitespace-pre-wrap text-sm">{assignment.submissions[0].summary}</p>
                       {assignment.submissions[0].attachmentKeys.length > 0 && (
                         <div className="mt-3 flex flex-wrap gap-2">
                           {assignment.submissions[0].attachmentKeys.map((key) => (
-                            <Button 
-                              key={key} 
-                              variant="outline" 
-                              size="sm" 
+                            <Button
+                              key={key}
+                              variant="outline"
+                              size="sm"
                               onClick={() => openPreview(`/api/files/${key}`)}
                             >
                               {key.match(/\.(jpg|jpeg|png|webp)$/i) ? <ImageIcon className="size-3 mr-1" /> : <File className="size-3 mr-1" />}
@@ -182,10 +171,25 @@ export default function AdminTaskDetailPage() {
                   <Textarea
                     id={`remarks-${assignment.id}`}
                     value={remarks[assignment.id] ?? ""}
-                    onChange={(e) => setRemarks((old) => ({ ...old, [assignment.id]: e.target.value }))}
+                    onChange={(e) => {
+                      setRemarks((old) => ({ ...old, [assignment.id]: e.target.value }));
+                      setRemarkErrors((old) => ({ ...old, [assignment.id]: "" }));
+                    }}
                     placeholder="Enter remarks visible to the student..."
                     rows={3}
+                    aria-invalid={Boolean(remarkErrors[assignment.id])}
+                    aria-describedby={
+                      remarkErrors[assignment.id]
+                        ? `remarks-${assignment.id}-error`
+                        : undefined
+                    }
                   />
+                  {remarkErrors[assignment.id] && (
+                    <InlineError
+                      message={remarkErrors[assignment.id]}
+                      id={`remarks-${assignment.id}-error`}
+                    />
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor={`notes-${assignment.id}`}>Private Internal Notes</Label>
@@ -200,14 +204,14 @@ export default function AdminTaskDetailPage() {
               </div>
 
               <div className="flex gap-2">
-                <Button 
+                <Button
                   onClick={() => void review(assignment.id, "ACCEPTED")}
                   disabled={assignment.status === "ACCEPTED"}
                 >
                   <CheckCircle2 className="size-3 mr-1" />
                   Accept
                 </Button>
-                <Button 
+                <Button
                   variant="outline"
                   onClick={() => void review(assignment.id, "RETURNED")}
                   disabled={assignment.status === "RETURNED"}
@@ -226,13 +230,13 @@ export default function AdminTaskDetailPage() {
                 ) : (
                   <div className="space-y-3">
                     {assignment.remarks.map((remark, index) => (
-                      <div key={index} className="rounded-lg border bg-muted p-3">
+                      <div key={index} className="rounded-sm border bg-muted p-3">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-medium">
                             {remark.visibility === "STUDENT_VISIBLE" ? (
                               <Badge variant="secondary" className="bg-primary/10 text-primary">Student Visible</Badge>
                             ) : (
-                              <Badge variant="secondary" className="bg-amber/10 text-amber-700">Internal Only</Badge>
+                              <Badge variant="secondary" className="bg-warning-surface/10 text-warning">Internal Only</Badge>
                             )}
                           </span>
                           <span className="text-xs text-muted-foreground">
@@ -258,7 +262,7 @@ export default function AdminTaskDetailPage() {
                       .slice()
                       .sort((a, b) => b.version - a.version)
                       .map((submission) => (
-                        <div key={submission.id} className="rounded-lg border bg-muted p-4">
+                        <div key={submission.id} className="rounded-sm border bg-muted p-4">
                           <div className="flex items-center justify-between">
                             <span className="font-medium">Version {submission.version}</span>
                             <span className="text-sm text-muted-foreground">
@@ -269,10 +273,10 @@ export default function AdminTaskDetailPage() {
                           {submission.attachmentKeys.length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-2">
                               {submission.attachmentKeys.map((key) => (
-                                <Button 
-                                  key={key} 
-                                  variant="outline" 
-                                  size="sm" 
+                                <Button
+                                  key={key}
+                                  variant="outline"
+                                  size="sm"
                                   onClick={() => openPreview(`/api/files/${key}`)}
                                 >
                                   {key.match(/\.(jpg|jpeg|png|webp)$/i) ? <ImageIcon className="size-3 mr-1" /> : <File className="size-3 mr-1" />}
@@ -297,10 +301,10 @@ export default function AdminTaskDetailPage() {
             </DialogHeader>
             <div className="flex items-center justify-center p-4">
               {previewImage && (
-                <img 
-                  src={previewImage} 
-                  alt="Preview" 
-                  className="max-w-full max-h-[70vh] object-contain rounded-lg"
+                <img
+                  src={previewImage}
+                  alt="Preview"
+                  className="max-w-full max-h-[70vh] object-contain rounded-sm"
                 />
               )}
             </div>

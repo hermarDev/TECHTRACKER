@@ -17,8 +17,9 @@ import {
 
 import { AppShell } from "@/components/shell/AppShell";
 import { useDraftForm } from "@/hooks/useDraftForm";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { InlineError } from "@/components/shell/InlineError";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -52,6 +53,7 @@ export default function RoomChecklistPage() {
   const [room, setRoom] = React.useState<Room | null>(null);
   const [roomError, setRoomError] = React.useState<string | null>(null);
   const [submitError, setSubmitError] = React.useState<string | null>(null);
+  const [photoErrors, setPhotoErrors] = React.useState<Record<string, string>>({});
   const [submitted, setSubmitted] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [uploadingUnit, setUploadingUnit] = React.useState<string | null>(null);
@@ -81,8 +83,8 @@ export default function RoomChecklistPage() {
       try {
         const notifRes = await fetch("/api/notifications?page=1&pageSize=50");
         if (notifRes.ok) {
-          const notifBody = (await notifRes.json()) as { data: { isRead: boolean }[] };
-          setUnread(notifBody.data.filter((n) => !n.isRead).length);
+          const notifBody = (await notifRes.json()) as { unread: number };
+          setUnread(notifBody.unread);
         }
       } catch {
         // Notification badge is best-effort in the local prototype.
@@ -93,14 +95,10 @@ export default function RoomChecklistPage() {
   }, [roomId]);
 
   React.useEffect(() => {
-    let cancelled = false;
     const loadData = async () => {
       void load();
     };
     loadData();
-    return () => {
-      cancelled = true;
-    };
   }, [load]);
 
   const itemFor = React.useCallback(
@@ -112,21 +110,25 @@ export default function RoomChecklistPage() {
   const updateItem = (unitId: string, patch: Partial<DraftItem>) => {
     const unit = room?.units.find((u) => u.id === unitId);
     if (!unit) return;
-    const current = itemFor(unit);
-    draft.setValues({
-      items: { ...draft.values.items, [unitId]: { ...current, ...patch } },
-    });
+    draft.setValues((prev) => ({
+      ...prev,
+      items: { ...prev.items, [unitId]: { ...(prev.items[unit.id] ?? { condition: unit.condition as Condition, remarks: "" }), ...patch } },
+    }));
   };
 
   const uploadPhoto = async (unitId: string, file: File) => {
     if (file.size > MAX_UPLOAD_BYTES) {
-      toast.error("Photo evidence must be 5 MB or smaller.");
+      setPhotoErrors((old) => ({ ...old, [unitId]: "Photo evidence must be 5 MB or smaller." }));
       return;
     }
     if (!ACCEPTED_UPLOAD_MIMES.includes(file.type)) {
-      toast.error("Photo evidence must be a JPEG, PNG, WEBP image or PDF.");
+      setPhotoErrors((old) => ({
+        ...old,
+        [unitId]: "Photo evidence must be a JPEG, PNG, WEBP image or PDF.",
+      }));
       return;
     }
+    setPhotoErrors((old) => ({ ...old, [unitId]: "" }));
     setUploadingUnit(unitId);
     try {
       const body = new FormData();
@@ -170,10 +172,7 @@ export default function RoomChecklistPage() {
       return item.condition !== "FUNCTIONING" && !item.remarks;
     });
     if (missingRemarks.length > 0) {
-      const message = `Defect remarks are required for ${missingRemarks.length} unit${missingRemarks.length === 1 ? "" : "s"} flagged Needs Maintenance or Needs Repair (${missingRemarks
-        .slice(0, 4)
-        .map((u) => u.unitCode)
-        .join(", ")}${missingRemarks.length > 4 ? "…" : ""}).`;
+      const message = `Defect remarks are required for all flagged units (${missingRemarks.map((unit) => unit.unitCode).join(", ")}).`;
       setSubmitError(message);
       toast.error(message);
       return;
@@ -232,14 +231,14 @@ export default function RoomChecklistPage() {
   if (!room) {
     return (
       <AppShell user={user} unreadNotifications={unread} title="Lab Unit Checklist">
-        <div className="rounded-xl border border-border bg-card p-6">
+        <div className="rounded-sm border border-border bg-card p-6">
           <p className="font-medium">Room not available</p>
           <p className="mt-1 text-sm text-muted-foreground">
             This laboratory room does not exist or is not assigned to your account.
           </p>
-          <Button type="button" variant="outline" size="sm" className="mt-4" render={<Link href="/inspections" />}>
+          <Link href="/inspections" className={buttonVariants({ variant: "outline", size: "sm", className: "mt-4" })}>
             Back to room selection
-          </Button>
+          </Link>
         </div>
       </AppShell>
     );
@@ -258,14 +257,14 @@ export default function RoomChecklistPage() {
       title={`Checklist — ${room.name}`}
       subtitle={`${room.building} · unit-by-unit condition audit (A–Z)`}
       actions={
-        <Button type="button" variant="outline" size="sm" render={<Link href="/inspections" />}>
+        <Link href="/inspections" className={buttonVariants({ variant: "outline", size: "sm" })}>
           Room selection
-        </Button>
+        </Link>
       }
     >
       <div className="grid gap-6">
         {submitted && (
-          <Alert className="border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300">
+          <Alert className="border-success-surface/40 bg-success-surface/10 text-success">
             <CheckCircle2 />
             <AlertTitle>Inspection submitted</AlertTitle>
             <AlertDescription>
@@ -276,7 +275,7 @@ export default function RoomChecklistPage() {
         )}
 
         {draft.restoredDraft && !submitted && (
-          <Alert className="border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300">
+          <Alert className="border-success-surface/40 bg-success-surface/10 text-success">
             <CheckCircle2 />
             <AlertTitle>Draft restored</AlertTitle>
             <AlertDescription>
@@ -289,7 +288,7 @@ export default function RoomChecklistPage() {
                 className="mt-2"
                 onClick={() => draft.clearDraft()}
               >
-                <Trash2 className="size-3.5" />
+                <Trash2 className="size-4" />
                 Clear draft
               </Button>
             </AlertDescription>
@@ -297,7 +296,7 @@ export default function RoomChecklistPage() {
         )}
 
         {/* Summary strip */}
-        <section className="grid gap-3 rounded-xl border border-border bg-card p-4 sm:grid-cols-3">
+        <section className="grid gap-3 rounded-sm border border-border bg-card p-4 sm:grid-cols-3">
           <div>
             <p className="text-xs text-muted-foreground">Units in room</p>
             <p className="text-lg font-semibold tabular-ledger">{room.units.length}</p>
@@ -312,11 +311,11 @@ export default function RoomChecklistPage() {
           </div>
         </section>
 
-        <section className="grid gap-3 rounded-xl border border-border bg-card p-4">
+        <section className="grid gap-3 rounded-sm border border-border bg-card p-4">
           <Label htmlFor="summary-note">Session summary note (optional)</Label>
           <Textarea
             id="summary-note"
-            placeholder="Overall room observations for this audit session —"
+            placeholder="Overall room observations for this audit session..."
             value={draft.values.summaryNote}
             onChange={(e) => draft.setValues({ summaryNote: e.target.value })}
             className="min-h-16"
@@ -335,7 +334,7 @@ export default function RoomChecklistPage() {
             const needsRemarks = item.condition !== "FUNCTIONING";
             const remarksInvalid = needsRemarks && item.remarks.trim() === "";
             return (
-              <article key={unit.id} className="grid gap-3 rounded-xl border border-border bg-card p-4">
+              <article key={unit.id} className="grid gap-3 rounded-sm border border-border bg-card p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-3">
                     <span className="flex size-8 items-center justify-center rounded-md bg-muted font-mono text-xs tabular-ledger">
@@ -346,21 +345,8 @@ export default function RoomChecklistPage() {
                       <p className="text-xs text-muted-foreground">Workstation unit</p>
                     </div>
                   </div>
-                  <select
-                    aria-label={`Condition for unit ${unit.unitCode}`}
-                    value={item.condition}
-                    onChange={(e) => updateItem(unit.id, { condition: e.target.value as Condition })}
-                    className="h-10 rounded-md border border-input bg-background px-2 text-sm"
-                  >
-                    {CONDITIONS.map((c) => (
-                      <option key={c} value={c}>
-                        {c === "FUNCTIONING"
-                          ? "Functioning"
-                          : c === "NEEDS_MAINTENANCE"
-                            ? "Needs Maintenance"
-                            : "Needs Repair"}
-                      </option>
-                    ))}
+                  <select aria-label={`Condition for unit ${unit.unitCode}`} value={item.condition} onChange={(event) => updateItem(unit.id, { condition: event.target.value as Condition })} className="min-h-11 w-48 max-w-full rounded-sm border border-input bg-background px-3 text-sm">
+                    {CONDITIONS.map((condition) => <option key={condition} value={condition}>{condition === "FUNCTIONING" ? "Functioning" : condition === "NEEDS_MAINTENANCE" ? "Needs Maintenance" : "Needs Repair"}</option>)}
                   </select>
                 </div>
 
@@ -381,12 +367,14 @@ export default function RoomChecklistPage() {
                     }
                     value={item.remarks}
                     onChange={(e) => updateItem(unit.id, { remarks: e.target.value })}
+                    aria-describedby={remarksInvalid ? `remarks-${unit.id}-error` : undefined}
                     className={remarksInvalid ? "border-destructive/50" : undefined}
                   />
                   {remarksInvalid && (
-                    <p role="alert" className="text-xs text-destructive">
-                      Defect remarks are mandatory for this condition.
-                    </p>
+                    <InlineError
+                      message="Defect remarks are mandatory for this condition."
+                      id={`remarks-${unit.id}-error`}
+                    />
                   )}
                 </div>
 
@@ -403,8 +391,13 @@ export default function RoomChecklistPage() {
                         e.target.value = "";
                         if (file) void uploadPhoto(unit.id, file);
                       }}
+                      aria-invalid={Boolean(photoErrors[unit.id])}
+                      aria-describedby={photoErrors[unit.id] ? `photo-${unit.id}-error` : undefined}
                     />
                   </label>
+                  {photoErrors[unit.id] && (
+                    <InlineError message={photoErrors[unit.id]} id={`photo-${unit.id}-error`} />
+                  )}
                   {item.photoKey && (
                     <>
                       <a
@@ -422,7 +415,7 @@ export default function RoomChecklistPage() {
                         size="sm"
                         onClick={() => updateItem(unit.id, { photoKey: undefined, photoName: undefined })}
                       >
-                        <Trash2 className="size-3.5" />
+                        <Trash2 className="size-4" />
                         Remove
                       </Button>
                     </>
@@ -432,7 +425,7 @@ export default function RoomChecklistPage() {
             );
           })}
           {room.units.length === 0 && (
-            <p className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">
+            <p className="rounded-sm border border-border bg-card p-6 text-sm text-muted-foreground">
               No workstation units are configured for this room yet.
             </p>
           )}
@@ -446,7 +439,7 @@ export default function RoomChecklistPage() {
           </Alert>
         )}
 
-        <section className="sticky bottom-20 z-20 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card/95 p-4 backdrop-blur-sm lg:bottom-4">
+        <section className="sticky bottom-20 z-20 flex flex-wrap items-center justify-between gap-3 rounded-sm border border-border bg-card/95 p-4 lg:bottom-4">
           <div className="text-sm text-muted-foreground">
             <span className="tabular-ledger">{room.units.length}</span> units ·{" "}
             <span className="tabular-ledger">{flaggedCount}</span> flagged ·{" "}
@@ -457,8 +450,10 @@ export default function RoomChecklistPage() {
               type="button"
               variant="outline"
               onClick={() => {
-                draft.clearDraft();
-                setSubmitted(false);
+                if (window.confirm("Reset session? This will clear all unit data and remarks. Are you sure?")) {
+                  draft.clearDraft();
+                  setSubmitted(false);
+                }
               }}
             >
               <RotateCcw className="size-4" />

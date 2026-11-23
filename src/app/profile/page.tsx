@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AppShell } from "@/components/shell/AppShell";
 import { PasswordInput } from "@/components/shell/PasswordInput";
+import { FloatingInput } from "@/components/shell/FloatingInput";
 
 interface ProfileUser {
   id: string;
@@ -70,6 +71,8 @@ export default function ProfilePage() {
     };
   }, []);
 
+  const isStudent = user?.role === "STUDENT";
+
   const handleDetailsSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setDetailsSubmitting(true);
@@ -79,7 +82,12 @@ export default function ProfilePage() {
       const res = await fetch("/api/profile", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ fullName, phone, program, section }),
+        body: JSON.stringify({
+          fullName,
+          phone,
+          program: isStudent ? program : "",
+          section: isStudent ? section : "",
+        }),
       });
       const body = (await res.json()) as { error?: string; message?: string };
 
@@ -146,7 +154,7 @@ export default function ProfilePage() {
       <div className="flex min-h-screen flex-1 items-center justify-center bg-muted/40 px-4">
         <div
           role="alert"
-          className="flex max-w-md items-start gap-2.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
+          className="flex max-w-md items-start gap-2.5 rounded-sm border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
         >
           <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
           <span>{loadError}</span>
@@ -172,7 +180,7 @@ export default function ProfilePage() {
       title="Account settings"
       subtitle="View your details, update contact information and change your password"
     >
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid items-start gap-5 lg:grid-cols-2">
         {/* Profile details */}
         <Card>
           <CardHeader>
@@ -181,15 +189,16 @@ export default function ProfilePage() {
               Profile Details
             </CardTitle>
             <CardDescription>
-              Update your name, phone number and class details. Email and student ID are managed by
-              your coordinator.
+              {isStudent
+                ? "Update your name, phone number and class details. Email and student ID are managed by your coordinator."
+                : "Update your name and phone number. Your email address is managed by the system administrator."}
             </CardDescription>
           </CardHeader>
           <CardContent>
             {detailsMode === "success" && (
               <div
                 role="status"
-                className="mb-4 flex items-start gap-2.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3.5 py-3 text-sm text-emerald-700 dark:text-emerald-300"
+                className="mb-4 flex items-start gap-2.5 rounded-sm border border-success-surface/40 bg-success-surface/10 px-3.5 py-3 text-sm text-success"
               >
                 <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                 <span>{detailsMessage}</span>
@@ -198,7 +207,7 @@ export default function ProfilePage() {
             {detailsMode === "error" && (
               <div
                 role="alert"
-                className="mb-4 flex items-start gap-2.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
+                className="mb-4 flex items-start gap-2.5 rounded-sm border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
               >
                 <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                 <span>{detailsMessage}</span>
@@ -206,68 +215,56 @@ export default function ProfilePage() {
             )}
 
             <form onSubmit={handleDetailsSubmit} className="space-y-4" noValidate>
-              <div className="space-y-2">
-                <Label htmlFor="fullName">Full name</Label>
-                <Input
-                  id="fullName"
-                  required
-                  className="h-11"
-                  placeholder="Enter your complete legal name"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                />
-              </div>
+              <FloatingInput
+                id="fullName"
+                label="Full name"
+                required
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+              />
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="email">Email address</Label>
                   <Input id="email" className="h-11 bg-muted/60" value={user?.email ?? ""} readOnly disabled />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="phone">Phone number</Label>
-                  <Input
-                    id="phone"
-                    type="tel"
-                    className="h-11"
-                    placeholder="Optional contact number"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="studentIdNo">Student ID number</Label>
-                  <Input
-                    id="studentIdNo"
-                    className="h-11 bg-muted/60"
-                    value={user?.studentIdNo ?? "—"}
-                    readOnly
-                    disabled
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="program">Program</Label>
-                  <Input
-                    id="program"
-                    required
-                    className="h-11"
-                    placeholder="e.g., BSIT"
-                    value={program}
-                    onChange={(e) => setProgram(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="section">Section</Label>
-                <Input
-                  id="section"
-                  required
-                  className="h-11"
-                  placeholder="Your current section"
-                  value={section}
-                  onChange={(e) => setSection(e.target.value)}
+                <FloatingInput
+                  id="phone"
+                  label="Phone number"
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
                 />
               </div>
+              {isStudent && (
+                <>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="studentIdNo">Student ID number</Label>
+                      <Input
+                        id="studentIdNo"
+                        className="h-11 bg-muted/60"
+                        value={user?.studentIdNo ?? "—"}
+                        readOnly
+                        disabled
+                      />
+                    </div>
+                    <FloatingInput
+                      id="program"
+                      label="Program"
+                      required
+                      value={program}
+                      onChange={(e) => setProgram(e.target.value)}
+                    />
+                  </div>
+                  <FloatingInput
+                    id="section"
+                    label="Section"
+                    required
+                    value={section}
+                    onChange={(e) => setSection(e.target.value)}
+                  />
+                </>
+              )}
               <Button type="submit" className="h-11 gap-2" disabled={detailsSubmitting || !user}>
                 <Save className="size-4" aria-hidden="true" />
                 <span>{detailsSubmitting ? "Saving..." : "Save changes"}</span>
@@ -292,7 +289,7 @@ export default function ProfilePage() {
             {passwordMode === "success" && (
               <div
                 role="status"
-                className="mb-4 flex items-start gap-2.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3.5 py-3 text-sm text-emerald-700 dark:text-emerald-300"
+                className="mb-4 flex items-start gap-2.5 rounded-sm border border-success-surface/40 bg-success-surface/10 px-3.5 py-3 text-sm text-success"
               >
                 <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                 <span>{passwordMessage}</span>
@@ -301,7 +298,7 @@ export default function ProfilePage() {
             {passwordMode === "error" && (
               <div
                 role="alert"
-                className="mb-4 flex items-start gap-2.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
+                className="mb-4 flex items-start gap-2.5 rounded-sm border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
               >
                 <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                 <span>{passwordMessage}</span>
@@ -309,42 +306,30 @@ export default function ProfilePage() {
             )}
 
             <form onSubmit={handlePasswordSubmit} className="space-y-4" noValidate>
-              <div className="space-y-2">
-                <Label htmlFor="currentPassword">Current password</Label>
-                <PasswordInput
-                  id="currentPassword"
-                  required
-                  autoComplete="current-password"
-                  placeholder="Enter your current password"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  aria-invalid={passwordMode === "error"}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="newPassword">New password</Label>
-                <PasswordInput
-                  id="newPassword"
-                  required
-                  autoComplete="new-password"
-                  placeholder="At least 8 characters"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  aria-invalid={passwordMode === "error"}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="confirmPassword">Confirm new password</Label>
-                <PasswordInput
-                  id="confirmPassword"
-                  required
-                  autoComplete="new-password"
-                  placeholder="Re-enter your new password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  aria-invalid={passwordMode === "error"}
-                />
-              </div>
+              <PasswordInput
+                id="currentPassword"
+                label="Current password"
+                required
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+              />
+              <PasswordInput
+                id="newPassword"
+                label="New password"
+                required
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+              />
+              <PasswordInput
+                id="confirmPassword"
+                label="Confirm new password"
+                required
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
               <Button type="submit" className="h-11 gap-2" disabled={passwordSubmitting || !user}>
                 <KeyRound className="size-4" aria-hidden="true" />
                 <span>{passwordSubmitting ? "Updating..." : "Change password"}</span>

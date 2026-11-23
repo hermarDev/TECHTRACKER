@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { requireApiSession, canUseMessaging } from "@/lib/rbac";
 import { z } from "zod";
@@ -17,7 +17,12 @@ const messageSendSchema = z.object({
   attachmentSize: z.number().optional().nullable(),
 });
 
-export async function GET() {
+const messageGetSchema = z.object({
+  page: z.string().default("1"),
+  pageSize: z.string().default("5"),
+});
+
+export async function GET(request: NextRequest) {
   "use server";
   await cookies();
   const auth = await requireApiSession();
@@ -29,17 +34,30 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden: SuperAdmin has no chat access" }, { status: 403 });
   }
 
+  const searchParams = new URL(request.url).searchParams;
+  const parse = messageGetSchema.safeParse({
+    page: searchParams.get("page") ?? "1",
+    pageSize: searchParams.get("pageSize") ?? "5",
+  });
+  if (!parse.success) {
+    return NextResponse.json({ error: "Invalid pagination params" }, { status: 400 });
+  }
+
+  const page = parse.data.page ? parseInt(parse.data.page, 10) : 1;
+  const pageSize = parse.data.pageSize ? parseInt(parse.data.pageSize, 10) : 5;
+  const skip = (page - 1) * pageSize;
+
   const conversations = await db.conversation.findMany({
     where: { members: { some: { userId: user.id } } },
     orderBy: { updatedAt: "desc" },
     include: {
       members: { include: { user: { select: { id: true, fullName: true, email: true, role: true } } } },
-      messages: { orderBy: { createdAt: "desc" }, take: 5 },
+      messages: { orderBy: { createdAt: "desc" }, take: pageSize, skip },
       batch: { select: { id: true, name: true, section: true } },
     },
   });
 
-  return NextResponse.json({ conversations });
+  return NextResponse.json({ conversations, page, pageSize });
 }
 
 export async function POST(req: Request) {

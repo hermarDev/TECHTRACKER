@@ -82,12 +82,20 @@ export default function TaskDetailPage() {
   }, [params.id]);
 
   const start = async () => {
+    setIsSubmitting(true);
     try {
-      await fetch(`/api/tasks/${params.id}/start`, { method: "POST" });
+      const response = await fetch(`/api/tasks/${params.id}/start`, { method: "POST" });
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        toast.error(data.error ?? "Task could not be started.");
+        return;
+      }
       toast.success("Task started");
       await load();
     } catch {
       toast.error("Failed to start task");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -150,12 +158,15 @@ export default function TaskDetailPage() {
 
   if (!user || !task) return <main className="p-8">Loading task...</main>;
   const assignment = task.assignments[0];
+  // A task can only be submitted while it is in progress or awaiting revision.
+  const canSubmit = ["IN_PROGRESS", "RETURNED"].includes(assignment.status);
+  const latestRemark = assignment.remarks[assignment.remarks.length - 1];
 
   return (
     <AppShell user={user} title={task.title} subtitle="Completion report and student-visible remarks.">
       <div className="max-w-3xl space-y-5">
-        <section className="rounded-xl border border-border bg-card">
-          <CardHeader>
+        <section className="rounded-sm border border-border bg-card p-4 lg:p-5">
+          <CardHeader className="pb-4">
             <CardTitle>{task.title}</CardTitle>
             <CardDescription>{task.category} · Due {new Date(task.deadline).toLocaleDateString()}</CardDescription>
           </CardHeader>
@@ -181,6 +192,14 @@ export default function TaskDetailPage() {
               )}
             </div>
             <p className="whitespace-pre-wrap text-sm">{task.instructions}</p>
+            {assignment.status === "RETURNED" && (
+              <div role="status" className="rounded-sm border border-destructive/40 bg-destructive/10 p-4 text-destructive">
+                <p className="font-medium">Returned for revision</p>
+                {latestRemark && (
+                  <p className="mt-1 whitespace-pre-wrap text-sm">{latestRemark.body}</p>
+                )}
+              </div>
+            )}
             {["ASSIGNED", "RETURNED"].includes(assignment.status) && (
               <Button onClick={start} disabled={isSubmitting}>
                 Start task
@@ -189,8 +208,8 @@ export default function TaskDetailPage() {
           </CardContent>
         </section>
 
-        <section className="rounded-xl border border-border bg-card">
-          <CardHeader>
+        <section className="rounded-sm border border-border bg-card p-4 lg:p-5">
+          <CardHeader className="pb-4">
             <CardTitle>Completion Report</CardTitle>
             <CardDescription>Submit your work summary and optional attachment (≤5MB)</CardDescription>
           </CardHeader>
@@ -241,10 +260,18 @@ export default function TaskDetailPage() {
               </div>
             </div>
 
-            <Button className="w-full min-h-11" onClick={submit} disabled={isSubmitting}>
+            <Button className="w-full min-h-11" onClick={submit} disabled={isSubmitting || !canSubmit}>
               {isSubmitting && <Loader2 className="size-4 mr-2 animate-spin" />}
               Submit / Resubmit
             </Button>
+
+            {!canSubmit && (
+              <p className="text-sm text-muted-foreground">
+                {assignment.status === "ASSIGNED"
+                  ? "Start the task before submitting your completion report."
+                  : "This report has already been submitted. Wait for the coordinator's review."}
+              </p>
+            )}
 
             {message && (
               <div 
@@ -262,8 +289,8 @@ export default function TaskDetailPage() {
           </CardContent>
         </section>
 
-        <section className="rounded-xl border border-border bg-card">
-          <CardHeader>
+        <section className="rounded-sm border border-border bg-card p-4 lg:p-5">
+          <CardHeader className="pb-4">
             <CardTitle>Remarks</CardTitle>
             <CardDescription>Threaded student-visible remarks</CardDescription>
           </CardHeader>
@@ -285,8 +312,8 @@ export default function TaskDetailPage() {
           </CardContent>
         </section>
 
-        <section className="rounded-xl border border-border bg-card">
-          <CardHeader>
+        <section className="rounded-sm border border-border bg-card p-4 lg:p-5">
+          <CardHeader className="pb-4">
             <CardTitle>Submission History</CardTitle>
             <CardDescription>Previous versions of your completion reports</CardDescription>
           </CardHeader>

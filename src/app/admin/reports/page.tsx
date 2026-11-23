@@ -7,9 +7,11 @@ import type { Role } from "@prisma/client";
 
 import { AppShell } from "@/components/shell/AppShell";
 import { DataTablePagination } from "@/components/shell/DataTablePagination";
+import { FloatingInput } from "@/components/shell/FloatingInput";
 import { useDraftForm } from "@/hooks/useDraftForm";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -83,8 +85,8 @@ export default function AdminReportsPage() {
         try {
           const notifRes = await fetch("/api/notifications?page=1&pageSize=50");
           if (notifRes.ok) {
-            const notifBody = (await notifRes.json()) as { data: { isRead: boolean }[] };
-            setUnread(notifBody.data.filter((n) => !n.isRead).length);
+            const notifBody = (await notifRes.json()) as { unread: number };
+            setUnread(notifBody.unread);
           }
         } catch {
           // Notification badge is best-effort in the local prototype.
@@ -178,7 +180,7 @@ export default function AdminReportsPage() {
       title="Operational Reporting & Export"
       subtitle="Attendance, duty hours, task progress, and lab equipment condition"
     >
-      <div className="grid gap-6">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
         {error && (
           <Alert variant="destructive" className="border-destructive/40 bg-destructive/10">
             <CircleAlert />
@@ -188,67 +190,63 @@ export default function AdminReportsPage() {
         )}
 
         {/* Filters */}
-        <section aria-labelledby="filters-heading" className="rounded-xl border border-border bg-card p-4">
+        <section aria-labelledby="filters-heading" className="rounded-sm border border-border bg-card p-4">
           <h2 id="filters-heading" className="flex items-center gap-2 text-base font-semibold">
             <Filter className="size-4 text-muted-foreground" />
             Report filters
           </h2>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 xl:grid-cols-5 [&>div]:min-w-0 [&_input]:min-w-0 [&_input]:max-w-full [&_select]:min-w-0 [&_select]:max-w-full">
             <div className="grid gap-1.5">
-              <label htmlFor="report-type" className="text-xs text-muted-foreground">
-                Report type
-              </label>
-              <select
-                id="report-type"
+              <label htmlFor="report-type" className="text-xs text-muted-foreground">Report type</label>
+              <Select
                 value={filters.values.type}
-                onChange={(e) => {
-                  filters.setValues({ type: e.target.value });
+                onValueChange={(value) => {
+                  filters.setValues({ type: value ?? "" });
                   setPage(1);
                 }}
-                className="h-10 rounded-md border border-input bg-background px-2 text-sm"
               >
-                {REPORT_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="report-type" aria-label="Report type" className="w-full">
+                  <SelectValue placeholder="Report type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {REPORT_TYPES.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>
+                      {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             {showBatchFilters && (
               <>
                 <div className="grid gap-1.5">
-                  <label htmlFor="report-batch" className="text-xs text-muted-foreground">
-                    Batch
-                  </label>
-                  <select
-                    id="report-batch"
-                    value={filters.values.batchId}
-                    onChange={(e) => {
-                      filters.setValues({ batchId: e.target.value });
+                  <span className="text-xs text-muted-foreground">Batch</span>
+                  <Select
+                    value={filters.values.batchId || "ALL"}
+                    onValueChange={(value) => {
+                      filters.setValues({ batchId: value === "ALL" ? "" : (value ?? "") });
                       setPage(1);
                     }}
-                    className="h-10 rounded-md border border-input bg-background px-2 text-sm"
                   >
-                    <option value="">All batches</option>
-                    {batches.map((batch) => (
-                      <option key={batch.id} value={batch.id}>
-                        {batch.name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger aria-label="Batch" className="w-full">
+                      <SelectValue placeholder="All batches" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">All batches</SelectItem>
+                      {batches.map((batch) => (
+                        <SelectItem key={batch.id} value={batch.id}>
+                          {batch.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-                <div className="grid gap-1.5">
-                  <label htmlFor="report-section" className="text-xs text-muted-foreground">
-                    Section
-                  </label>
-                  <input
-                    id="report-section"
-                    value={filters.values.section}
-                    onChange={(e) => filters.setValues({ section: e.target.value })}
-                    placeholder="e.g., BSIT-4A"
-                    className="h-10 rounded-md border border-input bg-background px-2 text-sm"
-                  />
-                </div>
+                <FloatingInput
+                  id="report-section"
+                  label="Section"
+                  value={filters.values.section}
+                  onChange={(e) => filters.setValues({ section: e.target.value })}
+                />
                 <div className="grid gap-1.5">
                   <label htmlFor="report-from" className="text-xs text-muted-foreground">
                     Date from
@@ -258,7 +256,7 @@ export default function AdminReportsPage() {
                     type="date"
                     value={filters.values.dateFrom}
                     onChange={(e) => filters.setValues({ dateFrom: e.target.value })}
-                    className="h-10 rounded-md border border-input bg-background px-2 text-sm"
+                    className="min-h-11 rounded-sm border border-input bg-background px-2 text-sm sm:min-h-10"
                   />
                 </div>
                 <div className="grid gap-1.5">
@@ -270,24 +268,24 @@ export default function AdminReportsPage() {
                     type="date"
                     value={filters.values.dateTo}
                     onChange={(e) => filters.setValues({ dateTo: e.target.value })}
-                    className="h-10 rounded-md border border-input bg-background px-2 text-sm"
+                    className="min-h-11 rounded-sm border border-input bg-background px-2 text-sm sm:min-h-10"
                   />
                 </div>
               </>
             )}
           </div>
-          <div className="mt-4 flex flex-wrap items-center gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2 [&_button]:max-w-full [&_button]:whitespace-normal">
             <Button type="button" onClick={runReport}>
               Generate report
             </Button>
-            <Button type="button" variant="outline" render={<a href={exportUrl("csv")} download />}>
+            <a className={buttonVariants({ variant: "outline" })} href={exportUrl("csv")} download>
               <FileDown className="size-4" />
               Export CSV
-            </Button>
-            <Button type="button" variant="outline" render={<a href={exportUrl("pdf")} download />}>
+            </a>
+            <a className={buttonVariants({ variant: "outline" })} href={exportUrl("pdf")} download>
               <FileText className="size-4" />
               Export PDF
-            </Button>
+            </a>
           </div>
           {filters.isDirty && (
             <p className="mt-2 text-xs text-muted-foreground">Filter selections preserved locally on this device.</p>
@@ -295,7 +293,7 @@ export default function AdminReportsPage() {
         </section>
 
         {/* Report table */}
-        <section aria-labelledby="table-heading" className="rounded-xl border border-border bg-card p-4 lg:p-5">
+        <section aria-labelledby="table-heading" className="rounded-sm border border-border bg-card p-4 lg:p-5">
           <h2 id="table-heading" className="text-base font-semibold">
             Report results
           </h2>
@@ -304,7 +302,7 @@ export default function AdminReportsPage() {
               No rows matched the selected filters. Adjust the filters or generate the report again.
             </p>
           ) : (
-            <div className="mt-4">
+            <div className="mt-4 min-w-0 max-w-full overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -322,14 +320,32 @@ export default function AdminReportsPage() {
                       <TableCell>{row.section || "—"}</TableCell>
                       <TableCell>{row.metric}</TableCell>
                       <TableCell className="tabular-ledger">{row.value}</TableCell>
-                      <TableCell className="max-w-72 truncate" title={row.label}>
-                        {row.label || "—"}
+                      <TableCell className="max-w-[min(18rem,45vw)]">
+                        {row.label ? (
+                          <div className="grid gap-0.5">
+                            {row.label.split(" - ").map((part, i) => (
+                              <span
+                                key={i}
+                                title={part}
+                                className={
+                                  i === 0
+                                    ? "truncate font-medium"
+                                    : "truncate text-xs text-muted-foreground"
+                                }
+                              >
+                                {part}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          "—"
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
-              <div className="mt-3">
+              <div className="mt-3 min-w-0 max-w-full [&_div]:flex-wrap [&_button]:max-w-full [&_button]:whitespace-normal">
                 <DataTablePagination
                   page={page}
                   pageSize={pageSize}

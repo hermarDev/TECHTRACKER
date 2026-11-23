@@ -27,6 +27,12 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-success-surface: var(--success-surface);
+  --color-warning: var(--warning);
+  --color-warning-surface: var(--warning-surface);
+  --color-info: var(--info);
+  --color-info-surface: var(--info-surface);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -39,7 +45,7 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-sm: 0.25rem;
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) * 1.4);
@@ -61,6 +67,12 @@
   --accent: oklch(0.945 0.018 255);
   --accent-foreground: oklch(0.22 0.04 260);
   --destructive: oklch(0.54 0.21 25);
+  --success: oklch(50.8% 0.118 165.612);
+  --success-surface: oklch(69.6% 0.17 162.48);
+  --warning: oklch(47.3% 0.137 46.201);
+  --warning-surface: oklch(76.9% 0.188 70.08);
+  --info: oklch(48.8% 0.243 264.376);
+  --info-surface: oklch(62.3% 0.214 259.815);
   --border: oklch(0.89 0.012 250);
   --input: oklch(0.86 0.014 250);
   --ring: oklch(0.46 0.19 260);
@@ -72,7 +84,7 @@
   --radius: 0.5rem;
   --sidebar: oklch(0.195 0.03 258);
   --sidebar-foreground: oklch(0.94 0.008 247);
-  --sidebar-primary: oklch(0.62 0.17 256);
+  --sidebar-primary: oklch(0.54 0.19 260);
   --sidebar-primary-foreground: oklch(0.99 0 0);
   --sidebar-accent: oklch(0.27 0.035 258);
   --sidebar-accent-foreground: oklch(0.98 0.004 247);
@@ -96,6 +108,12 @@
   --accent: oklch(0.26 0.04 258);
   --accent-foreground: oklch(0.96 0.01 247);
   --destructive: oklch(0.66 0.2 24);
+  --success: oklch(84.5% 0.143 164.978);
+  --success-surface: oklch(69.6% 0.17 162.48);
+  --warning: oklch(87.9% 0.169 91.605);
+  --warning-surface: oklch(76.9% 0.188 70.08);
+  --info: oklch(80.9% 0.105 251.813);
+  --info-surface: oklch(62.3% 0.214 259.815);
   --border: oklch(0.29 0.025 258);
   --input: oklch(0.32 0.028 258);
   --ring: oklch(0.62 0.17 256);
@@ -147,15 +165,36 @@
 }
 
 .tabular-ledger {
-  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  :where(*, *::before, *::after):not(
+      :where(
+        [role="status"],
+        [aria-live],
+        [aria-busy="true"],
+        [data-state="loading"],
+        [data-slot="spinner"],
+        [data-slot="progress"],
+        .animate-spin,
+        .animate-pulse,
+        [role="status"] *,
+        [aria-live] *,
+        [aria-busy="true"] *,
+        [data-state="loading"] *,
+        [data-slot="spinner"] *,
+        [data-slot="progress"] *,
+        .animate-spin *,
+        .animate-pulse *
+      )
+    ) {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
 }
+
+/* Floating fields inherit the surface on which their labels sit. */
+[data-slot="dialog-content"] { --field-surface: var(--popover); }

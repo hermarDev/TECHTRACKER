@@ -6,7 +6,8 @@ import {
   BadgeCheck,
   CircleAlert,
   CheckCircle2,
-  Search,
+  Copy,
+  MoreHorizontal,
   UploadCloud,
   UserCheck,
 } from "lucide-react";
@@ -15,8 +16,23 @@ import type { Role } from "@prisma/client";
 import { AppShell } from "@/components/shell/AppShell";
 import { StatusBadge } from "@/components/shell/StatusBadge";
 import { DataTablePagination } from "@/components/shell/DataTablePagination";
+import { DataTableToolbar } from "@/components/shell/DataTableToolbar";
+import { InlineError } from "@/components/shell/InlineError";
 import { useDraftForm } from "@/hooks/useDraftForm";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Dialog,
@@ -113,7 +129,7 @@ export default function AdminStudentsPage() {
   const [wizardStep, setWizardStep] = React.useState(1);
   const [wizardFile, setWizardFile] = React.useState<File | null>(null);
   const [parsedRows, setParsedRows] = React.useState<ParsedRow[]>([]);
-  const [parseError, setParseError] = React.useState<string | null>(null);
+  const [fileError, setFileError] = React.useState<string | null>(null);
   const [parsing, setParsing] = React.useState(false);
   const [importBusy, setImportBusy] = React.useState(false);
   const [importResult, setImportResult] = React.useState<ImportResult | null>(null);
@@ -138,8 +154,8 @@ export default function AdminStudentsPage() {
       try {
         const notifRes = await fetch("/api/notifications?page=1&pageSize=50");
         if (notifRes.ok) {
-          const notifBody = (await notifRes.json()) as { data: { isRead: boolean }[] };
-          setUnread(notifBody.data.filter((n) => !n.isRead).length);
+          const notifBody = (await notifRes.json()) as { unread: number };
+          setUnread(notifBody.unread);
         }
       } catch {
         // Notification badge is best-effort in the local prototype.
@@ -179,25 +195,17 @@ export default function AdminStudentsPage() {
   );
 
   React.useEffect(() => {
-    let cancelled = false;
     const loadData = async () => {
       void load();
     };
     loadData();
-    return () => {
-      cancelled = true;
-    };
   }, [load]);
 
   React.useEffect(() => {
-    let cancelled = false;
     const loadData = async () => {
       void loadStudents(page, pageSize);
     };
     loadData();
-    return () => {
-      cancelled = true;
-    };
   }, [loadStudents, page, pageSize]);
 
   React.useEffect(() => {
@@ -237,9 +245,9 @@ export default function AdminStudentsPage() {
   const parseFile = async (file: File) => {
     setWizardFile(file);
     setParsedRows([]);
-    setParseError(null);
+    setFileError(null);
     if (file.size > MAX_IMPORT_BYTES) {
-      setParseError("The roster file exceeds the 5 MB limit.");
+      setFileError("The roster file exceeds the 5 MB limit.");
       return;
     }
     const isCsv = file.type === "text/csv" || file.name.toLowerCase().endsWith(".csv");
@@ -247,7 +255,7 @@ export default function AdminStudentsPage() {
       file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
       file.name.toLowerCase().endsWith(".xlsx");
     if (!isCsv && !isXlsx) {
-      setParseError("Unsupported file type. Upload a CSV or XLSX roster.");
+      setFileError("Unsupported file type. Upload a CSV or XLSX roster.");
       return;
     }
     setParsing(true);
@@ -267,12 +275,12 @@ export default function AdminStudentsPage() {
       }
       parsed = parsed.filter((r) => r.email || r.studentIdNo || r.fullName);
       if (parsed.length === 0) {
-        setParseError("No roster rows were detected. Check that the file has a header row.");
+        setFileError("No roster rows were detected. Check that the file has a header row.");
         return;
       }
       setParsedRows(parsed);
     } catch {
-      setParseError("The file could not be parsed. Confirm it is a valid CSV or XLSX roster.");
+      setFileError("The file could not be parsed. Confirm it is a valid CSV or XLSX roster.");
     } finally {
       setParsing(false);
     }
@@ -284,7 +292,7 @@ export default function AdminStudentsPage() {
     setWizardStep(1);
     setWizardFile(null);
     setParsedRows([]);
-    setParseError(null);
+    setFileError(null);
     setImportResult(null);
     setWizardError(null);
     setWizardOpen(true);
@@ -292,9 +300,10 @@ export default function AdminStudentsPage() {
 
   const runImport = async () => {
     if (!wizardFile) {
-      setWizardError("Choose a CSV or XLSX roster file first.");
+      setFileError("Choose a CSV or XLSX roster file first.");
       return;
     }
+    setFileError(null);
     setImportBusy(true);
     setWizardError(null);
     try {
@@ -364,51 +373,51 @@ export default function AdminStudentsPage() {
         )}
 
         {/* 15W — Directory filters */}
-        <section aria-labelledby="directory-heading" className="min-w-0 rounded-xl border border-border bg-card p-4 lg:p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <section aria-labelledby="directory-heading" className="min-w-0 rounded-sm border border-border bg-card p-4 lg:p-5">
+          <div className="grid gap-3">
             <h2 id="directory-heading" className="text-base font-semibold">
               Student directory
             </h2>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <span className="relative">
-                <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2" />
-                <input
-                  aria-label="Search students by name, ID, or email"
-                  value={searchDraft}
-                  onChange={(e) => {
-                    setPage(1);
-                    setSearchDraft(e.target.value);
-                  }}
-                  placeholder="Name, ID, or email —"
-                  className="h-9 rounded-md border border-input bg-background pl-7 pr-2 text-xs"
-                />
-              </span>
-              <select
-                aria-label="Filter by status"
-                value={statusFilter}
-                onChange={(e) => {
-                  setPage(1);
-                  setStatusFilter(e.target.value);
-                }}
-                className="h-9 rounded-md border border-input bg-background px-2 text-xs"
-              >
-                <option value="">All statuses</option>
-                <option value="PENDING_VERIFICATION">Pending Verification</option>
-                <option value="ACTIVE">Active</option>
-                <option value="SUSPENDED">Suspended</option>
-                <option value="DEACTIVATED">Deactivated</option>
-              </select>
-              <input
-                aria-label="Filter by section"
-                value={sectionFilter}
-                onChange={(e) => {
-                  setPage(1);
-                  setSectionFilter(e.target.value);
-                }}
-                placeholder="Section —"
-                className="h-9 rounded-md border border-input bg-background px-2 text-xs"
-              />
-            </div>
+            <DataTableToolbar
+              search={searchDraft}
+              onSearchChange={(value) => {
+                setPage(1);
+                setSearchDraft(value);
+              }}
+              searchPlaceholder="Search name, ID, or email..."
+              filters={
+                <>
+                  <Select
+                    value={statusFilter || "ALL"}
+                    onValueChange={(value) => {
+                      setPage(1);
+                      setStatusFilter(value === "ALL" ? "" : (value ?? ""));
+                    }}
+                  >
+                    <SelectTrigger className="h-9 w-44" aria-label="Filter by status">
+                      <SelectValue placeholder="All statuses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">All statuses</SelectItem>
+                      <SelectItem value="PENDING_VERIFICATION">Pending Verification</SelectItem>
+                      <SelectItem value="ACTIVE">Active</SelectItem>
+                      <SelectItem value="SUSPENDED">Suspended</SelectItem>
+                      <SelectItem value="DEACTIVATED">Deactivated</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <input
+                    aria-label="Filter by section"
+                    value={sectionFilter}
+                    onChange={(e) => {
+                      setPage(1);
+                      setSectionFilter(e.target.value);
+                    }}
+                    placeholder="Filter section..."
+                    className="h-9 rounded-sm border border-input bg-background px-2.5 text-sm"
+                  />
+                </>
+              }
+            />
           </div>
 
           {rows.length === 0 ? (
@@ -417,7 +426,7 @@ export default function AdminStudentsPage() {
               your batches.
             </p>
           ) : (
-            <div className="mt-4 min-w-0 overflow-x-auto">
+            <div className="mt-4 min-w-0 max-w-full overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -437,7 +446,7 @@ export default function AdminStudentsPage() {
                         <p className="font-medium">{student.fullName}</p>
                         <p className="text-xs text-muted-foreground">{student.email}</p>
                       </TableCell>
-                      <TableCell className="tabular-ledger">{student.studentIdNo ?? "—"}</TableCell>
+                      <TableCell className="font-mono tabular-ledger">{student.studentIdNo ?? "—"}</TableCell>
                       <TableCell>
                         {student.program ?? "—"} / {student.section ?? "—"}
                       </TableCell>
@@ -447,27 +456,62 @@ export default function AdminStudentsPage() {
                       </TableCell>
                       <TableCell className="tabular-ledger">{formatDate(student.createdAt)}</TableCell>
                       <TableCell>
-                        <div className="flex justify-end">
-                          {student.status === "PENDING_VERIFICATION" ? (
+                        <div className="flex items-center justify-end gap-1.5">
+                          {student.status === "PENDING_VERIFICATION" && (
                             <Button
                               type="button"
                               size="sm"
                               disabled={verifyingId === student.id}
                               onClick={() => void verifyStudent(student)}
                             >
-                              <BadgeCheck className="size-3.5" />
+                              <BadgeCheck className="size-4" />
                               {verifyingId === student.id ? "Verifying…" : "Verify Pending"}
                             </Button>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
                           )}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              render={
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-9"
+                                  aria-label={`More actions for ${student.fullName}`}
+                                />
+                              }
+                            >
+                              <MoreHorizontal className="size-4" />
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  void navigator.clipboard.writeText(student.email);
+                                  toast.success("Email address copied.");
+                                }}
+                              >
+                                <Copy className="size-4" />
+                                Copy email
+                              </DropdownMenuItem>
+                              {student.studentIdNo && (
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    void navigator.clipboard.writeText(student.studentIdNo!);
+                                    toast.success("Student ID copied.");
+                                  }}
+                                >
+                                  <Copy className="size-4" />
+                                  Copy student ID
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
-              <div className="mt-3">
+              <div className="mt-3 min-w-0 max-w-full [&_div]:flex-wrap [&_button]:max-w-full [&_button]:whitespace-normal">
                 <DataTablePagination
                   page={page}
                   pageSize={pageSize}
@@ -499,7 +543,7 @@ export default function AdminStudentsPage() {
 
           {wizardStep === 1 && (
             <div className="grid gap-3">
-              <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-muted/30 p-6 text-center hover:bg-muted/60">
+              <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center gap-2 rounded-sm border border-dashed border-border bg-muted/30 p-6 text-center hover:bg-muted/60">
                 <UploadCloud className="size-6 text-muted-foreground" aria-hidden="true" />
                 <span className="text-sm font-medium">
                   {wizardFile ? wizardFile.name : "Choose roster file (CSV or XLSX)"}
@@ -516,16 +560,12 @@ export default function AdminStudentsPage() {
                     e.target.value = "";
                     if (file) void parseFile(file);
                   }}
+                  aria-invalid={Boolean(fileError)}
+                  aria-describedby={fileError ? "roster-file-error" : undefined}
                 />
               </label>
               {parsing && <p className="text-sm text-muted-foreground">Parsing roster…</p>}
-              {parseError && (
-                <Alert variant="destructive" className="border-destructive/40 bg-destructive/10">
-                  <CircleAlert />
-                  <AlertTitle>File problem</AlertTitle>
-                  <AlertDescription>{parseError}</AlertDescription>
-                </Alert>
-              )}
+              {fileError && <InlineError message={fileError} id="roster-file-error" />}
             </div>
           )}
 
@@ -539,7 +579,7 @@ export default function AdminStudentsPage() {
                   required fields
                 </span>
               </p>
-              <div className="max-h-64 overflow-auto rounded-lg border border-border">
+              <div className="max-h-64 overflow-auto rounded-sm border border-border">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -580,7 +620,7 @@ export default function AdminStudentsPage() {
                 {RESOLUTION_OPTIONS.map((option) => (
                   <label
                     key={option.value}
-                    className={`flex min-h-11 items-start gap-3 rounded-lg border p-3 text-sm ${
+                    className={`flex min-h-11 items-start gap-3 rounded-sm border p-3 text-sm ${
                       importDraft.values.duplicateResolution === option.value
                         ? "border-primary/40 bg-primary/5"
                         : "border-border"
@@ -605,19 +645,24 @@ export default function AdminStudentsPage() {
                 <label htmlFor="import-batch" className="text-sm font-medium">
                   Assign imported students to batch (optional)
                 </label>
-                <select
-                  id="import-batch"
-                  value={importDraft.values.batchId}
-                  onChange={(e) => importDraft.setValues({ batchId: e.target.value })}
-                  className="h-10 rounded-md border border-input bg-background px-2 text-sm"
+                <Select
+                  value={importDraft.values.batchId || "NONE"}
+                  onValueChange={(value) =>
+                    importDraft.setValues({ batchId: value === "NONE" ? "" : (value ?? "") })
+                  }
                 >
-                  <option value="">No batch assignment</option>
-                  {batches.map((batch) => (
-                    <option key={batch.id} value={batch.id}>
-                      {batch.name} ({batch.section})
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger id="import-batch" className="w-full">
+                    <SelectValue placeholder="No batch assignment" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NONE">No batch assignment</SelectItem>
+                    {batches.map((batch) => (
+                      <SelectItem key={batch.id} value={batch.id}>
+                        {batch.name} ({batch.section})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               {importDraft.isDirty && (
                 <p className="text-xs text-muted-foreground">Import choices preserved locally on this device.</p>
@@ -626,7 +671,7 @@ export default function AdminStudentsPage() {
           )}
 
           {wizardStep === 4 && !importResult && (
-            <div className="grid gap-2 rounded-lg border border-border bg-muted/30 p-4 text-sm">
+            <div className="grid gap-2 rounded-sm border border-border bg-muted/30 p-4 text-sm">
               <p>
                 <span className="text-muted-foreground">File:</span> {wizardFile?.name ?? "—"}{" "}
                 {wizardFile && (
@@ -660,7 +705,7 @@ export default function AdminStudentsPage() {
                     ["Errors", importResult.summary.errors],
                   ] as const
                 ).map(([label, value]) => (
-                  <div key={label} className="rounded-lg border border-border bg-card p-3 text-center">
+                  <div key={label} className="rounded-sm border border-border bg-card p-3 text-center">
                     <p className="text-lg font-semibold tabular-ledger">{value}</p>
                     <p className="text-xs text-muted-foreground">{label}</p>
                   </div>
@@ -724,10 +769,15 @@ export default function AdminStudentsPage() {
                   Done
                 </Button>
               ) : (
-                <Button type="button" onClick={() => void runImport()} disabled={importBusy}>
-                  <UploadCloud className="size-4" />
-                  {importBusy ? "Importing…" : "Confirm & import"}
-                </Button>
+                <div>
+                  <Button type="button" onClick={() => void runImport()} disabled={importBusy}>
+                    <UploadCloud className="size-4" />
+                    {importBusy ? "Importing…" : "Confirm & import"}
+                  </Button>
+                  {fileError && !wizardFile && (
+                    <InlineError message={fileError} id="roster-file-error" />
+                  )}
+                </div>
               )}
             </div>
           </div>

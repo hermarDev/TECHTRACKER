@@ -8,7 +8,7 @@ web
 
 ## Stack
 
-delegated + Charter-specified: Next.js (App Router, TypeScript), Tailwind CSS, shadcn/ui, Prisma ORM, PostgreSQL 16 (local Docker), local R2-compatible signed object storage, local SMTP outbox viewer (zero paid subscriptions).
+delegated + Charter-specified: Next.js 16 (App Router, TypeScript, React 19) frontend, Tailwind CSS 4, shadcn/ui (base-ui), Prisma 6 ORM + PostgreSQL 16 (local Docker, 127.0.0.1:5444). Local R2-compatible signed object storage, local SMTP outbox viewer (zero paid subscriptions). Backend is being migrated to Rust: Axum 0.7 + sqlx 0.8 + Postgres in `backend/`; Next.js route handlers remain until each Rust equivalent is implemented and tested, with `/api/*` proxied via `RUST_BACKEND_URL` when set. Dev server runs on 127.0.0.1:3219.
 
 ## Users
 
@@ -30,7 +30,7 @@ Used on campus workstations, laptops, and mobile browsers (Chrome/Android web) i
 
 ## Capabilities and Constraints
 
-- **Web Flows Covered:** Pages `01W–16W` paired with Shared Backend Flows `02S–10S` from the approved TechTracker Draw.io workbooks.
+- **Web Flows Covered:** Pages `01W–16W` paired with Shared Backend Flows `02S–10S` from the approved TechTracker Draw.io workbooks. All 16 UI flows implemented; backend is mid-migration from Next.js route handlers to Rust/Axum (see Stack).
 - **Mandatory Charter Delimitations:**
   - Attendance photos are supporting evidence only — NO geolocation, GPS, geofence, facial recognition, or liveness detection.
   - Lab equipment inspection records condition (`Functioning`, `Needs Maintenance`, `Needs Repair`), mandatory defect remarks, and photo proof — NO urgent repair alert dispatch, repair work-orders, or technician ticketing.
@@ -46,12 +46,15 @@ Used on campus workstations, laptops, and mobile browsers (Chrome/Android web) i
 - **Name:** TechTracker (ACLC College of Mandaue — BSIT Pre-OJT & Lab Equipment Monitoring).
 - **UI Library & Styling:** shadcn/ui components styled with Tailwind CSS.
 - **Tone:** Clear institutional precision, unambiguous status vocabulary (`Pending Review`, `Approved / Credited`, `Irregular / Off-Schedule`, `Returned for Revision`, `Accepted`, `Functioning`, `Needs Maintenance`, `Needs Repair`).
+- **Visual world (standing preference):** Canon — the category standard executed at Linear / Notion / GitHub craft level: clean precise product UI, Plus Jakarta Sans + JetBrains Mono, cobalt primary on slate rail, sharp (4px) corners, no decorative gradients or glassmorphism, status pills with non-color indicators. Recorded after rejecting the Blueprint world and two re-rolls.
 
 ## Evidence on Hand
 
 - Project Charter: `/home/hrmr/Documents/CAPSTONE_TEACHTRACKER/TechTracker_Project_Charter_Justified.docx`
 - Master Flowcharts: `/home/hrmr/Documents/CAPSTONE_TEACHTRACKER/FLOWCHARTS/output/TechTracker_Web_Master_Flowcharts.drawio` (`01W–16W`) and `TechTracker_Shared_Backend_Flowcharts.drawio` (`02S–10S`).
-- No pre-existing application code in `Tech_Tracker/` (greenfield prototype).
+- Implemented application in `Tech_Tracker/`: 16 UI flows (`01W–16W`) plus shared backend flows (`02S–10S`), organized as three implementation domains (A: auth/dashboard/profile/dev outbox; B: attendance/tasks; C: inspections/messages/notifications/admin/superadmin). Next.js route handlers plus a Rust/Axum backend in `backend/` (most domains migrated; remaining stubs: attendance accreditation PDF, admin CSV/XLSX student import, files serving already implemented).
+- Tests: Vitest integration/unit suite (89 tests) under `tests/integration/` and `tests/unit/`; Playwright E2E suite (24 tests) under `tests/e2e/`.
+- Visual/UX evidence: `.impeccable/surfaces/src-app-page-tsx.md` surface brief (Candidate 6 institutional ledger direction); `.next/` build output and `test-results/` artifacts.
 
 ## Product Principles
 

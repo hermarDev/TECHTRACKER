@@ -131,7 +131,7 @@ async function establishSessionFor(user: {
 }
 
 function outboxFor(email: string) {
-  return db.emailOutbox.findMany({ where: { toEmail: { contains: RUN } }, orderBy: { createdAt: "asc" } });
+  return db.emailOutbox.findMany({ where: { toEmail: email }, orderBy: { createdAt: "asc" } });
 }
 
 async function latestTokenFromOutbox(email: string, category: string): Promise<string> {

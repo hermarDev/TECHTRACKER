@@ -14,16 +14,22 @@ const taskSchema = z.object({
   studentIds: z.array(z.string().min(1)).min(1),
 });
 
+const TASK_STATUSES = ["ASSIGNED", "IN_PROGRESS", "SUBMITTED", "RETURNED", "ACCEPTED"];
+
 export async function GET(request: NextRequest) {
   const auth = await requireApiSession(["STUDENT", "ADMIN", "SUPERADMIN"]);
   if (!auth.ok) return auth.response;
   const { searchParams } = request.nextUrl;
   const pagination = normalizePagination(searchParams.get("page"), searchParams.get("pageSize"));
   const search = searchParams.get("search")?.trim() ?? "";
+  const rawStatus = searchParams.get("status") ?? "";
+  // Status lives on the assignment, not the task; ignore unknown values instead of throwing.
+  const status = TASK_STATUSES.includes(rawStatus) ? rawStatus : "";
   const where: Record<string, unknown> = {};
-  if (auth.user.role === "STUDENT") where.assignments = { some: { studentId: auth.user.id } };
+  if (auth.user.role === "STUDENT") where.assignments = { some: { studentId: auth.user.id, ...(status && { status }) } };
   if (auth.user.role === "ADMIN") where.createdById = auth.user.id;
   if (search) where.title = { contains: search, mode: "insensitive" };
+  if (status && auth.user.role !== "STUDENT") where.assignments = { some: { status } };
   const [items, total] = await Promise.all([
     db.task.findMany({ where, include: { assignments: { where: auth.user.role === "STUDENT" ? { studentId: auth.user.id } : undefined, include: { student: { select: { id: true, fullName: true, studentIdNo: true } } } } }, orderBy: { createdAt: "desc" }, skip: pagination.skip, take: pagination.take }),
     db.task.count({ where }),

@@ -1,5 +1,8 @@
+/* Authenticated and local preview images bypass the Next image optimizer. */
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import * as React from "react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -18,11 +21,13 @@ import type { Role } from "@prisma/client";
 
 import { AppShell } from "@/components/shell/AppShell";
 import { useDraftForm } from "@/hooks/useDraftForm";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { InlineError } from "@/components/shell/InlineError";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // Charter: <= 5 MB uploads
 const ACCEPTED_UPLOAD_MIMES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
@@ -32,7 +37,7 @@ type ConversationMessage = {
   id: string;
   body: string;
   senderId: string;
-  sender: { fullName: string };
+  sender?: { fullName: string };
   attachmentKey: string | null;
   attachmentName: string | null;
   attachmentSize: number | null;
@@ -44,7 +49,7 @@ type Conversation = {
   type: "DIRECT" | "BATCH";
   updatedAt: string;
   batch: { id: string; name: string; section: string } | null;
-  members: { user: { id: string; fullName: string; email: string; role: string } }[];
+  members: { user?: { id: string; fullName: string; email: string; role: string } }[];
   messages: ConversationMessage[];
 };
 type AdminBatch = { id: string; name: string; section: string };
@@ -52,6 +57,19 @@ type DirectoryStudent = { id: string; fullName: string; email: string };
 
 function formatTime(value: string): string {
   return new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
+function isImageAttachment(name: string | null): boolean {
+  return Boolean(name && /\.(jpe?g|png|webp)$/i.test(name));
 }
 
 function formatBytes(size: number): string {
@@ -63,9 +81,8 @@ function formatBytes(size: number): string {
 function conversationLabel(conversation: Conversation, meId: string): string {
   if (conversation.title) return conversation.title;
   const others = conversation.members
-    .map((m) => m.user)
-    .filter((u) => u.id !== meId)
-    .map((u) => u.fullName);
+    .filter((m) => m.user && m.user.id !== meId)
+    .map((m) => m.user?.fullName || "Former member");
   return others.length > 0 ? others.join(", ") : "Conversation";
 }
 
@@ -79,9 +96,15 @@ export default function MessagesPage() {
   const [unread, setUnread] = React.useState(0);
   const [conversations, setConversations] = React.useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [selectedPage, setSelectedPage] = React.useState(1);
+  const [conversationPage, setConversationPage] = React.useState(1);
+  const threadRef = React.useRef<HTMLElement>(null);
+  const messagesEndRef = React.useRef<HTMLElement>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [sending, setSending] = React.useState(false);
   const [attachment, setAttachment] = React.useState<File | null>(null);
+  const [composerError, setComposerError] = React.useState("");
+  const [attachmentError, setAttachmentError] = React.useState("");
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [pickerMode, setPickerMode] = React.useState<"BATCH" | "DIRECT">("BATCH");
   const [pickerBody, setPickerBody] = React.useState("");
@@ -90,6 +113,11 @@ export default function MessagesPage() {
   const [pickerBatchId, setPickerBatchId] = React.useState("");
   const [pickerStudentIds, setPickerStudentIds] = React.useState<string[]>([]);
   const [pickerError, setPickerError] = React.useState<string | null>(null);
+  const [pickerFieldErrors, setPickerFieldErrors] = React.useState({
+    body: "",
+    batch: "",
+    recipients: "",
+  });
   const [pickerSending, setPickerSending] = React.useState(false);
 
   const isAdmin = me?.role === "ADMIN";
@@ -107,14 +135,14 @@ export default function MessagesPage() {
       try {
         const notifRes = await fetch("/api/notifications?page=1&pageSize=50");
         if (notifRes.ok) {
-          const notifBody = (await notifRes.json()) as { data: { isRead: boolean }[] };
-          setUnread(notifBody.data.filter((n) => !n.isRead).length);
+          const notifBody = (await notifRes.json()) as { unread: number };
+          setUnread(notifBody.unread);
         }
       } catch {
         // Notification badge is best-effort in the local prototype.
       }
       if (meBody.user.role === "SUPERADMIN") return; // Charter 160/199: no chat data for SuperAdmin.
-      const res = await fetch("/api/messages");
+      const res = await fetch("/api/messages?page=" + conversationPage + "&pageSize=5");
       if (!res.ok) {
         const body = (await res.json()) as { error?: string };
         setError(body.error ?? "Conversations could not be loaded.");
@@ -126,18 +154,31 @@ export default function MessagesPage() {
     } catch {
       setError("TechTracker could not reach the server. Check your connection and retry.");
     }
-  }, []);
+  }, [conversationPage]);
 
   React.useEffect(() => {
-    let cancelled = false;
     const loadData = async () => {
       void load();
     };
     loadData();
-    return () => {
-      cancelled = true;
-    };
   }, [load]);
+
+  React.useEffect(() => {
+    const scrollToBottom = () => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    };
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          scrollToBottom();
+        }
+      },
+      { root: messagesEndRef.current }
+    );
+    const target = messagesEndRef.current;
+    if (target) observer.observe(target);
+    return () => observer.disconnect();
+  }, [selectedId]);
 
   const selected = conversations.find((c) => c.id === selectedId) ?? null;
   const composer = useDraftForm<{ body: string }>(
@@ -169,21 +210,24 @@ export default function MessagesPage() {
     if (!selected) return;
     const bodyText = composer.values.body.trim();
     if (!bodyText) {
-      toast.error("Write a message before sending.");
+      setComposerError("Write a message before sending.");
       return;
     }
+    setComposerError("");
+    setAttachmentError("");
     setSending(true);
     try {
       let uploaded: { key: string; name: string; mime: string; size: number } | null = null;
       if (attachment) {
         if (attachment.size > MAX_UPLOAD_BYTES) {
-          toast.error("Attachments must be 5 MB or smaller.");
+          setAttachmentError("Attachments must be 5 MB or smaller.");
           return;
         }
         if (!ACCEPTED_UPLOAD_MIMES.includes(attachment.type)) {
-          toast.error("Attachments must be a JPEG, PNG, WEBP image or PDF.");
+          setAttachmentError("Attachments must be a JPEG, PNG, WEBP image or PDF.");
           return;
         }
+        setAttachmentError("");
         const formData = new FormData();
         formData.set("file", attachment);
         formData.set("category", "messages");
@@ -229,18 +273,16 @@ export default function MessagesPage() {
   // ---- New Conversation picker (forward-compatible with POST /api/messages) ----
   const sendNewConversation = async () => {
     const bodyText = pickerBody.trim();
-    if (!bodyText) {
-      setPickerError("Write the first message before sending.");
-      return;
-    }
-    if (pickerMode === "BATCH" && !pickerBatchId) {
-      setPickerError("Select a batch to message.");
-      return;
-    }
-    if (pickerMode === "DIRECT" && pickerStudentIds.length === 0) {
-      setPickerError("Select at least one recipient.");
-      return;
-    }
+    const errors = {
+      body: bodyText ? "" : "Write the first message before sending.",
+      batch: pickerMode === "BATCH" && !pickerBatchId ? "Select a batch to message." : "",
+      recipients:
+        pickerMode === "DIRECT" && pickerStudentIds.length === 0
+          ? "Select at least one recipient."
+          : "",
+    };
+    setPickerFieldErrors(errors);
+    if (errors.body || errors.batch || errors.recipients) return;
     setPickerError(null);
     setPickerSending(true);
     try {
@@ -288,7 +330,7 @@ export default function MessagesPage() {
   if (me.role === "SUPERADMIN") {
     return (
       <AppShell user={me} unreadNotifications={unread} title="Messages">
-        <div className="mx-auto grid max-w-xl gap-4 rounded-xl border border-border bg-card p-6 text-center">
+        <div className="mx-auto grid max-w-xl gap-4 rounded-sm border border-border bg-card p-6 text-center">
           <ShieldOff className="mx-auto size-10 text-muted-foreground" aria-hidden="true" />
           <h2 className="text-lg font-semibold">Alerts Only — No Chat Access</h2>
           <p className="text-sm text-muted-foreground">
@@ -297,13 +339,13 @@ export default function MessagesPage() {
             coordinators and students, so this console has no chat capabilities.
           </p>
           <div className="flex flex-wrap justify-center gap-2">
-            <Button type="button" render={<Link href="/notifications" />}>
+            <Link href="/notifications" className={buttonVariants()}>
               <BellRing className="size-4" />
               Open system alerts
-            </Button>
-            <Button type="button" variant="outline" render={<Link href="/superadmin" />}>
+            </Link>
+            <Link href="/superadmin" className={buttonVariants({ variant: "outline" })}>
               Back to console
-            </Button>
+            </Link>
           </div>
         </div>
       </AppShell>
@@ -330,23 +372,27 @@ export default function MessagesPage() {
       unreadNotifications={unread}
       title="Messages"
       subtitle="Individual and batch coordination with Pre-OJT coordinators"
-      actions={
-        <Button type="button" size="sm" onClick={() => setPickerOpen(true)}>
+      actions={me.role !== "STUDENT" ? (
+        <Button type="button" size="sm" aria-label="New Conversation" onClick={() => setPickerOpen(true)}>
           <MessageSquarePlus className="size-4" />
-          New Conversation
+          <span className="hidden sm:inline">New Conversation</span>
         </Button>
-      }
+      ) : null}
     >
       <div className="grid gap-4 lg:grid-cols-[minmax(280px,2fr)_minmax(0,3fr)]">
         {/* Conversation list */}
-        <section aria-label="Conversations" className="rounded-xl border border-border bg-card">
+        <section aria-label="Conversations" className="min-w-0 w-full rounded-sm border border-border bg-card">
           <div className="border-b border-border px-4 py-3">
             <h2 className="text-sm font-semibold">Conversations</h2>
-            <p className="text-xs text-muted-foreground tabular-ledger">{conversations.length} threads</p>
+            <p className="text-xs text-muted-foreground tabular-ledger">
+              {conversations.length} thread{conversations.length === 1 ? "" : "s"}
+            </p>
           </div>
           {conversations.length === 0 ? (
             <p className="px-4 py-6 text-sm text-muted-foreground">
-              No conversations yet. Use “New Conversation” to start one.
+              {me.role === "STUDENT"
+                ? "No conversations yet. Your coordinator will start threads; check notifications for updates."
+                : "No conversations yet. Use “New Conversation” to start one."}
             </p>
           ) : (
             <ul className="max-h-[28rem] divide-y divide-border overflow-y-auto lg:max-h-[40rem]">
@@ -355,13 +401,25 @@ export default function MessagesPage() {
                   <button
                     type="button"
                     aria-current={selectedId === conversation.id ? "true" : undefined}
-                    onClick={() => setSelectedId(conversation.id)}
+                    onClick={() => {
+                      setSelectedId(conversation.id);
+                      if (window.matchMedia("(max-width: 1023px)").matches) threadRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
                     className={`w-full px-4 py-3 text-left transition-colors hover:bg-muted ${
                       selectedId === conversation.id ? "bg-muted" : ""
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <p className="truncate text-sm font-medium">{conversationLabel(conversation, me.id)}</p>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Avatar className="size-8">
+                          <AvatarFallback>
+                            {initials(conversationLabel(conversation, me.id))}
+                          </AvatarFallback>
+                        </Avatar>
+                        <p className="truncate text-sm font-medium">
+                          {conversationLabel(conversation, me.id)}
+                        </p>
+                      </div>
                       <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                         {conversation.type === "BATCH" ? "Batch" : "Direct"}
                       </span>
@@ -375,12 +433,22 @@ export default function MessagesPage() {
                   </button>
                 </li>
               ))}
+              {conversations.length >= 5 && (
+                <li key="load-older">
+                  <button
+                    type="button"
+                    onClick={() => setConversationPage((prev) => prev + 1)}
+                    className="w-full px-4 py-3 text-left text-xs text-muted-foreground hover:underline">
+                    Load older conversations
+                  </button>
+                </li>
+              )}
             </ul>
           )}
         </section>
 
         {/* Thread */}
-        <section aria-label="Message thread" className="flex min-h-[28rem] flex-col rounded-xl border border-border bg-card">
+        <section ref={threadRef} aria-label="Message thread" className="flex min-h-[28rem] min-w-0 w-full flex-col rounded-sm border border-border bg-card">
           {!selected ? (
             <div className="flex flex-1 items-center justify-center p-6">
               <p className="text-sm text-muted-foreground">Select a conversation to read the thread.</p>
@@ -405,15 +473,36 @@ export default function MessagesPage() {
                   return (
                     <li key={message.id} className={own ? "flex justify-end" : "flex justify-start"}>
                       <div
-                        className={`max-w-[85%] rounded-xl border p-3 ${
+                        className={`max-w-[85%] rounded-sm border p-3 ${
                           own ? "border-primary/25 bg-primary/10" : "border-border bg-muted/40"
                         }`}
                       >
-                        <p className="text-xs font-medium text-muted-foreground">
-                          {own ? "You" : message.sender.fullName}
-                          <span className="ml-2 tabular-ledger">{formatTime(message.createdAt)}</span>
-                        </p>
+                        <div className="mb-1 flex items-center gap-2">
+                          <Avatar className="size-6">
+                            <AvatarFallback className="text-[10px]">
+                              {initials(own ? me.fullName : (message.sender?.fullName ?? "Deleted user"))}
+                            </AvatarFallback>
+                          </Avatar>
+                          <p className="text-xs font-medium text-muted-foreground">
+                            {own ? "You" : (message.sender?.fullName ?? "Deleted user")}
+                            <span className="ml-2 tabular-ledger">{formatTime(message.createdAt)}</span>
+                          </p>
+                        </div>
                         <p className="mt-1 text-sm whitespace-pre-wrap">{message.body}</p>
+                        {message.attachmentKey && isImageAttachment(message.attachmentName) && (
+                          <a
+                            href={`/api/files/${message.attachmentKey}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-2 block w-fit"
+                          >
+                            <img
+                              src={`/api/files/${message.attachmentKey}`}
+                              alt={message.attachmentName ?? "Image attachment"}
+                              className="max-h-40 max-w-full rounded-lg border border-border object-cover"
+                            />
+                          </a>
+                        )}
                         {message.attachmentKey && (
                           <a
                             href={`/api/files/${message.attachmentKey}`}
@@ -421,7 +510,7 @@ export default function MessagesPage() {
                             rel="noreferrer"
                             className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs hover:bg-muted"
                           >
-                            <Paperclip className="size-3.5" />
+                            <Paperclip className="size-4" />
                             <span className="max-w-48 truncate">{message.attachmentName ?? "Attachment"}</span>
                             {message.attachmentSize != null && (
                               <span className="text-muted-foreground tabular-ledger">
@@ -437,33 +526,50 @@ export default function MessagesPage() {
               </ol>
 
               <div className="border-t border-border p-4">
-                <Label htmlFor="composer-body">Message</Label>
-                <Textarea
-                  id="composer-body"
-                  placeholder="Write your message —"
-                  value={composer.values.body}
-                  onChange={(e) => composer.setValues({ body: e.target.value })}
-                  className="mt-1 min-h-20"
-                />
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-muted">
+                <div className="flex items-end gap-2 rounded-sm border border-input bg-background p-2">
+                  <label className="inline-flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
                     <Paperclip className="size-4" />
-                    {attachment ? attachment.name : "Attach file (≤ 5 MB)"}
+                    <span className="sr-only">Attach file (≤ 5 MB)</span>
                     <input
                       type="file"
                       className="sr-only"
                       accept="image/jpeg,image/png,image/webp,application/pdf"
                       onChange={(e) => {
                         setAttachment(e.target.files?.[0] ?? null);
+                        setAttachmentError("");
                         e.target.value = "";
                       }}
+                      aria-invalid={Boolean(attachmentError)}
+                      aria-describedby={attachmentError ? "attachment-error" : undefined}
                     />
                   </label>
-                  <Button type="button" onClick={() => void sendToExisting()} disabled={sending} className="ml-auto">
+                  <Textarea
+                    id="composer-body"
+                    rows={2}
+                    placeholder="Write a message..."
+                    value={composer.values.body}
+                    onChange={(e) => {
+                      composer.setValues({ body: e.target.value });
+                      setComposerError("");
+                    }}
+                    className="min-h-10 flex-1 resize-none border-0 bg-transparent p-1.5 shadow-none focus-visible:ring-0"
+                    aria-label="Message"
+                    aria-invalid={Boolean(composerError)}
+                    aria-describedby={composerError ? "composer-error" : undefined}
+                  />
+                  <Button
+                    type="button"
+                    size="icon"
+                    onClick={() => void sendToExisting()}
+                    disabled={sending}
+                    aria-label="Send message"
+                    className="size-10 shrink-0 rounded-sm"
+                  >
                     <Send className="size-4" />
-                    {sending ? "Sending…" : "Send message"}
                   </Button>
                 </div>
+                {composerError && <InlineError message={composerError} id="composer-error" />}
+                {attachmentError && <InlineError message={attachmentError} id="attachment-error" />}
                 {attachment && (
                   <button
                     type="button"
@@ -498,33 +604,50 @@ export default function MessagesPage() {
             <div className="grid gap-4">
               <div className="grid gap-1.5">
                 <Label htmlFor="picker-mode">Recipients</Label>
-                <select
-                  id="picker-mode"
+                <Select
                   value={pickerMode}
-                  onChange={(e) => setPickerMode(e.target.value === "BATCH" ? "BATCH" : "DIRECT")}
-                  className="h-10 rounded-md border border-input bg-background px-2 text-sm"
+                  onValueChange={(value) => setPickerMode(value === "BATCH" ? "BATCH" : "DIRECT")}
                 >
-                  <option value="BATCH">Batch announcement</option>
-                  <option value="DIRECT">Individual students</option>
-                </select>
+                  <SelectTrigger id="picker-mode" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="BATCH">Batch announcement</SelectItem>
+                    <SelectItem value="DIRECT">Individual students</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               {pickerMode === "BATCH" ? (
                 <div className="grid gap-1.5">
                   <Label htmlFor="picker-batch">Duty batch</Label>
-                  <select
-                    id="picker-batch"
-                    value={pickerBatchId}
-                    onChange={(e) => setPickerBatchId(e.target.value)}
-                    className="h-10 rounded-md border border-input bg-background px-2 text-sm"
+                  <Select
+                    value={pickerBatchId || "NONE"}
+                    onValueChange={(value) => {
+                      setPickerBatchId(value === "NONE" ? "" : (value ?? ""));
+                      setPickerFieldErrors((old) => ({ ...old, batch: "" }));
+                    }}
                   >
-                    <option value="">Select a batch —</option>
-                    {pickerBatches.map((batch) => (
-                      <option key={batch.id} value={batch.id}>
-                        {batch.name} ({batch.section})
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger
+                      id="picker-batch"
+                      className="w-full"
+                      aria-invalid={Boolean(pickerFieldErrors.batch)}
+                      aria-describedby={pickerFieldErrors.batch ? "picker-batch-error" : undefined}
+                    >
+                      <SelectValue placeholder="Select a batch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="NONE">Select a batch</SelectItem>
+                      {pickerBatches.map((batch) => (
+                        <SelectItem key={batch.id} value={batch.id}>
+                          {batch.name} ({batch.section})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {pickerFieldErrors.batch && (
+                    <InlineError message={pickerFieldErrors.batch} id="picker-batch-error" />
+                  )}
                 </div>
               ) : (
                 <fieldset className="grid max-h-48 gap-1.5 overflow-y-auto rounded-md border border-input p-2">
@@ -537,13 +660,14 @@ export default function MessagesPage() {
                       <input
                         type="checkbox"
                         checked={pickerStudentIds.includes(student.id)}
-                        onChange={(e) =>
+                        onChange={(e) => {
                           setPickerStudentIds((current) =>
                             e.target.checked
                               ? [...current, student.id]
                               : current.filter((id) => id !== student.id),
-                          )
-                        }
+                          );
+                          setPickerFieldErrors((old) => ({ ...old, recipients: "" }));
+                        }}
                         className="size-4 accent-[var(--primary)]"
                       />
                       <UserRound className="size-3.5 text-muted-foreground" />
@@ -553,16 +677,27 @@ export default function MessagesPage() {
                   ))}
                 </fieldset>
               )}
+              {pickerFieldErrors.recipients && (
+                <InlineError message={pickerFieldErrors.recipients} id="picker-recipients-error" />
+              )}
 
               <div className="grid gap-1.5">
                 <Label htmlFor="picker-body">First message</Label>
                 <Textarea
                   id="picker-body"
-                  placeholder="Write the first message —"
+                  placeholder="Write the first message..."
                   value={pickerBody}
-                  onChange={(e) => setPickerBody(e.target.value)}
+                  onChange={(e) => {
+                    setPickerBody(e.target.value);
+                    setPickerFieldErrors((old) => ({ ...old, body: "" }));
+                  }}
                   className="min-h-20"
+                  aria-invalid={Boolean(pickerFieldErrors.body)}
+                  aria-describedby={pickerFieldErrors.body ? "picker-body-error" : undefined}
                 />
+                {pickerFieldErrors.body && (
+                  <InlineError message={pickerFieldErrors.body} id="picker-body-error" />
+                )}
               </div>
 
               {pickerError && (
@@ -585,7 +720,7 @@ export default function MessagesPage() {
             </div>
           ) : (
             <div className="grid gap-4">
-              <Alert className="border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300">
+              <Alert className="border-success-surface/40 bg-success-surface/10 text-success">
                 <CheckCircle2 />
                 <AlertTitle>Waiting on coordinator threads</AlertTitle>
                 <AlertDescription>

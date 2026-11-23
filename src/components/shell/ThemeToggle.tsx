@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Moon, Sun, Monitor } from "lucide-react";
+import { Moon, Monitor } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 
 type ThemePref = "light" | "dark" | "system";
@@ -13,6 +14,16 @@ function applyTheme(pref: ThemePref) {
   const isDark = pref === "dark" || (pref === "system" && prefersDark);
   document.documentElement.classList.toggle("dark", isDark);
   document.documentElement.style.colorScheme = isDark ? "dark" : "light";
+}
+
+function setPref(pref: ThemePref) {
+  try {
+    localStorage.setItem("techtracker_theme", pref);
+  } catch {
+    // ignore
+  }
+  applyTheme(pref);
+  window.dispatchEvent(new Event("techtracker-theme-change"));
 }
 
 export function ThemeToggle() {
@@ -59,53 +70,13 @@ export function ThemeToggle() {
     return () => mq.removeEventListener("change", handleMq);
   }, []);
 
-  const toggleLightDark = () => {
-    const isDarkNow = document.documentElement.classList.contains("dark");
-    const next: ThemePref = isDarkNow ? "light" : "dark";
-    try {
-      localStorage.setItem("techtracker_theme", next);
-    } catch {
-      // ignore
-    }
-    applyTheme(next);
-    window.dispatchEvent(new Event("techtracker-theme-change"));
-  };
-
-  const setSystem = () => {
-    try {
-      localStorage.setItem("techtracker_theme", "system");
-    } catch {
-      // ignore
-    }
-    applyTheme("system");
-    window.dispatchEvent(new Event("techtracker-theme-change"));
-  };
-
   return (
-    <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-card p-0.5">
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        onClick={toggleLightDark}
-        aria-label="Toggle light or dark theme"
-        title="Switch light / dark theme"
-        className="size-10 rounded-md"
-      >
-        <Sun className="size-4 rotate-0 scale-100 transition-transform dark:-rotate-90 dark:scale-0" />
-        <Moon className="absolute size-4 rotate-90 scale-0 transition-transform dark:rotate-0 dark:scale-100" />
+    <div className="inline-flex items-center gap-0.5 rounded-sm border border-border bg-card p-0.5" role="group" aria-label="Theme preference">
+      <Button type="button" variant="ghost" size="icon" className="size-11 sm:size-10" aria-label="Toggle light or dark theme" onClick={() => setPref(document.documentElement.classList.contains("dark") ? "light" : "dark")}>
+        <Moon className="size-4" aria-hidden="true" />
       </Button>
-      <Button
-        type="button"
-        variant={pref === "system" ? "secondary" : "ghost"}
-        size="icon"
-        onClick={setSystem}
-        aria-label="Use system theme"
-        aria-pressed={pref === "system"}
-        title="Follow system theme"
-        className="size-10 rounded-md"
-      >
-        <Monitor className="size-4" />
+      <Button type="button" variant={pref === "system" ? "secondary" : "ghost"} size="icon" className="size-11 sm:size-10" aria-label="Use system theme" aria-pressed={pref === "system"} onClick={() => setPref("system")}>
+        <Monitor className="size-4" aria-hidden="true" />
       </Button>
     </div>
   );

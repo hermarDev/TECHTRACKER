@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-23T12:08:06.010008Z",
+  "title": "Design System: TechTracker",
+  "extensions": {
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "description": "Primary action",
+      "html": "<button class=\"ds-button\">Save changes</button>",
+      "css": ".ds-button{background:var(--primary,oklch(0.46 0.19 260));color:var(--primary-foreground,white);border:1px solid transparent;border-radius:4px;padding:8px 12px;font:500 14px Plus Jakarta Sans,sans-serif}.ds-button:hover{opacity:.8}.ds-button:focus-visible{outline:3px solid var(--ring,blue)}",
+      "refersTo": "button-primary"
+    },
+    {
+      "name": "Outline button",
+      "kind": "button",
+      "description": "Secondary action",
+      "html": "<button class=\"ds-outline\">Cancel</button>",
+      "css": ".ds-outline{background:var(--background,#fff);color:var(--foreground,#172033);border:1px solid var(--border,#ddd);border-radius:4px;padding:8px 12px;font:500 14px Plus Jakarta Sans,sans-serif}.ds-outline:hover{background:var(--muted,#eee)}.ds-outline:focus-visible{outline:3px solid var(--ring,blue)}"
+    },
+    {
+      "name": "Text field",
+      "kind": "input",
+      "description": "Labeled form input",
+      "html": "<label class=\"ds-label\">Email address<input class=\"ds-input\" type=\"email\"></label>",
+      "css": ".ds-label{display:grid;gap:6px;color:var(--foreground,#172033);font:500 14px Plus Jakarta Sans,sans-serif}.ds-input{border:1px solid var(--input,#ccd3dd);border-radius:4px;background:var(--background,#fff);color:var(--foreground,#172033);padding:10px}.ds-input:focus-visible{outline:3px solid var(--ring,blue)}"
+    },
+    {
+      "name": "Navigation",
+      "kind": "nav",
+      "description": "Persistent role navigation",
+      "html": "<nav class=\"ds-nav\"><a href=\"#\" class=\"ds-nav-link\">Attendance</a></nav>",
+      "css": ".ds-nav{background:var(--sidebar,#202936);padding:12px}.ds-nav-link{display:block;color:var(--sidebar-foreground,#fff);padding:10px;border-radius:4px;font:500 14px Plus Jakarta Sans,sans-serif;text-decoration:none}.ds-nav-link:hover{background:var(--sidebar-accent,#384250)}.ds-nav-link:focus-visible{outline:3px solid var(--sidebar-ring,#7199e8)}"
+    },
+    {
+      "name": "Status badge",
+      "kind": "chip",
+      "description": "Status text and non-color indicator",
+      "html": "<span class=\"ds-status\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 6v6l4 2\"/></svg> Pending Review</span>",
+      "css": ".ds-status{display:inline-flex;align-items:center;gap:4px;border:1px solid color-mix(in oklch,var(--warning-surface,orange) 40%,transparent);background:color-mix(in oklch,var(--warning-surface,orange) 12%,transparent);color:var(--warning,#8b5b00);border-radius:9999px;padding:2px 8px;font:500 12px Plus Jakarta Sans,sans-serif}"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "description": "Operational content group",
+      "html": "<section class=\"ds-card\"><strong>My attendance</strong><p>Review recorded duty hours.</p></section>",
+      "css": ".ds-card{background:var(--card,#fff);color:var(--card-foreground,#172033);border:1px solid var(--border,#ddd);border-radius:4px;padding:16px;font:14px Plus Jakarta Sans,sans-serif}.ds-card p{color:var(--muted-foreground,#667);margin:8px 0 0}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Canon",
+    "overview": "Canon is a restrained institutional workspace: clear hierarchy, aligned data, and familiar controls support quick, accountable work. Cobalt accents and a slate navigation rail establish identity without decorative gradients or glass effects.",
+    "keyCharacteristics": [
+      "Clear hierarchy and aligned data",
+      "Cobalt accents and slate navigation",
+      "Status labels with non-color indicators"
+    ],
+    "rules": [],
+    "dos": [
+      "Keep pending and credited hours distinct, and use the product's established status vocabulary.",
+      "Give each icon-only action an accessible name and each interactive element a visible focus state.",
+      "Keep dense operational screens scannable on both desktop and mobile."
+    ],
+    "donts": [
+      "Avoid decorative gradients, glassmorphism, and reliance on color alone."
+    ]
+  }
+}

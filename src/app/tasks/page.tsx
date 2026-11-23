@@ -2,19 +2,22 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { AppShell } from "@/components/shell/AppShell";
 import { StatusBadge } from "@/components/shell/StatusBadge";
+import { AppShell } from "@/components/shell/AppShell";
 import { DataTablePagination } from "@/components/shell/DataTablePagination";
-import { useDraftForm } from "@/hooks/useDraftForm";
 import { toast } from "sonner";
-import { Search, Loader2, Filter } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { DataTableToolbar } from "@/components/shell/DataTableToolbar";
+import { Calendar, Loader2 } from "lucide-react";
+import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 type User = { id: string; fullName: string; email: string; role: "STUDENT" };
 type Task = { 
@@ -35,59 +38,32 @@ export default function TasksPage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [total, setTotal] = React.useState(0);
 
-  const draft = useDraftForm("techtracker-task-search", { search: "" });
-
-  const load = React.useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const params = new URLSearchParams({
-        page: page.toString(),
-        pageSize: pageSize.toString(),
-        ...(search && { search }),
-        ...(statusFilter && { status: statusFilter }),
-      });
-      const [me, result] = await Promise.all([
-        fetch("/api/auth/me"),
-        fetch(`/api/tasks?${params.toString()}`)
-      ]);
-      if (me.ok) setUser((await me.json()).user);
-      if (result.ok) {
-        const data = await result.json();
-        setTasks(data.items);
-        setTotal(data.total);
-      }
-    } catch {
-      toast.error("Failed to load tasks");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [page, pageSize, search, statusFilter]);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/auth/me", { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => { if (data) setUser(data.user); })
+      .catch((error) => { if (error.name !== "AbortError") toast.error("Failed to load account"); });
+    return () => controller.abort();
+  }, []);
 
   React.useEffect(() => {
-    let mounted = true;
-    const doLoad = async () => {
-      const params = new URLSearchParams({
-        page: page.toString(),
-        pageSize: pageSize.toString(),
-        ...(search && { search }),
-        ...(statusFilter && { status: statusFilter }),
-      });
-      const [me, result] = await Promise.all([
-        fetch("/api/auth/me"),
-        fetch(`/api/tasks?${params.toString()}`)
-      ]);
-      if (mounted) {
-        if (me.ok) setUser((await me.json()).user);
-        if (result.ok) {
-          const data = await result.json();
-          setTasks(data.items);
-          setTotal(data.total);
-        }
-        setIsLoading(false);
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setIsLoading(true);
+      try {
+        const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize), ...(search && { search }), ...(statusFilter && { status: statusFilter }) });
+        const response = await fetch(`/api/tasks?${params}`, { signal: controller.signal });
+        if (!response.ok) throw new Error("Request failed");
+        const data = await response.json();
+        if (!controller.signal.aborted) { setTasks(data.items); setTotal(data.total ?? data.items.length); }
+      } catch {
+        if (!controller.signal.aborted) toast.error("Failed to load tasks");
+      } finally {
+        if (!controller.signal.aborted) setIsLoading(false);
       }
-    };
-    doLoad();
-    return () => { mounted = false; };
+    }, 250);
+    return () => { window.clearTimeout(timer); controller.abort(); };
   }, [page, pageSize, search, statusFilter]);
 
   const statusOptions = ["ALL", "ASSIGNED", "IN_PROGRESS", "SUBMITTED", "RETURNED", "ACCEPTED"];
@@ -96,35 +72,33 @@ export default function TasksPage() {
 
   return (
     <AppShell user={user} title="Technical Tasks" subtitle="Start, document, and resubmit assigned work.">
-      <section className="rounded-xl border border-border bg-card">
-        <CardHeader className="pb-3">
+      <section className="rounded-sm border border-border bg-card p-4 lg:p-5">
+        <CardHeader className="pb-4">
           <CardTitle>My Tasks</CardTitle>
-          <CardDescription>Filter and search your assigned technical tasks</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input
-                placeholder="Search tasks..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-10 h-11"
-              />
-            </div>
-            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value || "")}>
-              <SelectTrigger className="w-full sm:w-48">
-                <SelectValue placeholder="All statuses" />
-              </SelectTrigger>
-              <SelectContent>
-                {statusOptions.map((status) => (
-                  <SelectItem key={status} value={status === "ALL" ? "" : status}>
-                    {status === "ALL" ? "All Statuses" : status.replace("_", " ")}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <DataTableToolbar
+            search={search}
+            onSearchChange={(value) => { setPage(1); setSearch(value); }}
+            searchPlaceholder="Search tasks..."
+            filters={
+              <Select
+                value={statusFilter || "ALL"}
+                onValueChange={(value) => { setPage(1); setStatusFilter(value === "ALL" ? "" : (value ?? "")); }}
+              >
+                <SelectTrigger size="sm" className="w-40" aria-label="Filter by status">
+                  <SelectValue placeholder="All statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  {statusOptions.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {status === "ALL" ? "All Statuses" : status.replace("_", " ")}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
 
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
@@ -136,50 +110,53 @@ export default function TasksPage() {
             </div>
           ) : (
             <>
-              <div className="grid gap-4">
-                {tasks.map((task) => {
-                  const assignment = task.assignments[0];
-                  const status = assignment?.status ?? "ASSIGNED";
-                  return (
-                    <Link 
-                      href={`/tasks/${task.id}`} 
-                      key={task.id} 
-                      className="rounded-xl border border-border bg-card p-5 hover:bg-muted transition-colors"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          <h2 className="font-semibold truncate">{task.title}</h2>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {task.category} · Due {new Date(task.deadline).toLocaleDateString()}
-                          </p>
-                        </div>
-                        <Badge 
-                          variant={
-                            status === "ACCEPTED" ? "default" :
-                            status === "RETURNED" ? "destructive" :
-                            status === "SUBMITTED" ? "secondary" :
-                            "outline"
-                          }
-                          className={
-                            status === "ACCEPTED" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" :
-                            status === "RETURNED" ? "bg-destructive/10 text-destructive" :
-                            ""
-                          }
-                        >
-                          {status.replace("_", " ")}
-                        </Badge>
-                      </div>
-                    </Link>
-                  );
-                })}
+              <div className="min-w-0 overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Task</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>
+                        <span className="inline-flex items-center gap-1.5">
+                          <Calendar className="size-4" aria-hidden="true" />
+                          Due date
+                        </span>
+                      </TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {tasks.map((task) => {
+                      const status = task.assignments[0]?.status ?? "ASSIGNED";
+                      return (
+                        <TableRow key={task.id}>
+                          <TableCell className="font-medium">
+                            <Link href={`/tasks/${task.id}`} className="hover:underline">
+                              {task.title}
+                            </Link>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">{task.category}</TableCell>
+                          <TableCell className="tabular-ledger">
+                            {new Date(task.deadline).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge status={status} />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
               </div>
-              <DataTablePagination 
-                page={page} 
-                pageSize={pageSize} 
-                total={total} 
-                onPageChange={setPage} 
-                onPageSizeChange={setPageSize} 
-              />
+              <div className="min-w-0 max-w-full [&_div]:flex-wrap [&_button]:max-w-full [&_button]:whitespace-normal">
+                <DataTablePagination
+                  page={page}
+                  pageSize={pageSize}
+                  total={total}
+                  onPageChange={setPage}
+                  onPageSizeChange={(size) => { setPage(1); setPageSize(size); }}
+                />
+              </div>
             </>
           )}
         </CardContent>

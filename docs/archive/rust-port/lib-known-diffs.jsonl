@@ -1,0 +1,20 @@
+{"fn":"hashPassword","args":["trailing.a\ud83d\ude00b\ud83d\ude00c"],"actual":{"ok":"$2b$10$......................EhIZy5TwxZ4xFUUMnZ1V1D8Zbe385qu"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["stra\u00dfe\ufeffbom"],"actual":{"ok":"$2b$10$......................jFiGq4X7QoPXUguPAfsJSj5ZWt8LkZ."},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["ns:key.path\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c8"],"actual":{"ok":"$2b$10$......................h96912dK3R8vWf78pRV4ecdQth0Twd6"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["hellostra\u00dfe"],"actual":{"ok":"$2b$10$......................VyvpoxSescnUAhEpObr0Q/94yl/AsDm"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["key_name-1\u03a3\u038a\u03a3\u03a5\u03a6\u039f\u03a3"],"actual":{"ok":"$2b$10$......................zLWDY2Lkb5BJqc2eWEiB4Pf4AGUJ19i"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["a..b"],"actual":{"ok":"$2b$10$......................n9QdSEcuDOOLc5rgjGQGmvWG2cgYjRS"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["e\u0301"],"actual":{"ok":"$2b$10$......................MxKxn/tCO/Ku0IqWnLNb3ZDgjBNEimi"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["HELLO"],"actual":{"ok":"$2b$10$......................29D8jmpod52vj1u/NVrhVVJ9jwDFh76"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["\ud83d\ude00"],"actual":{"ok":"$2b$10$......................JEdiO93ahifPLX7iGbJK/DM2fru0.eK"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["{name} has {count} items"],"actual":{"ok":"$2b$10$......................QZkCQWtnQ1C4Bf.kz/pUNjN8aLr2/5S"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["a\ud83d\ude00b\ud83d\ude00c"],"actual":{"ok":"$2b$10$......................PLPJGEiN4cP5mPlNlO/G0AHJN36jwCG"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["hello worldemoji \ud83d\udc4d\ud83c\udffd mix"],"actual":{"ok":"$2b$10$.......................BrSM/DEfQ0QOZjgH19UhsZsF4kPlxi"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["hello world"],"actual":{"ok":"$2b$10$......................0qB0aWGMv6DA02pNuQfoC.hs3kYE89a"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["  padded  e\u0301"],"actual":{"ok":"$2b$10$......................DyCn.Z4Iv8tw.0O0FqjgjrjGHihDLBm"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["{name} has {count} items\u0130stanbul"],"actual":{"ok":"$2b$10$......................b2eIlug.zyDgyuMdD0U.SRYVsT/DmIS"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["stra\u00dfe"],"actual":{"ok":"$2b$10$......................D1gOvfOI.LvDPqhjZJk4TcEHL660lhC"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["a"],"actual":{"ok":"$2b$10$......................xKCzFv/EViOW9WnF221DLG7MpmI.n46"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["src/a/b.ts"],"actual":{"ok":"$2b$10$......................QcmA6MlX/XeLWaOmtQelfXtR1nTjIdi"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["a:b:ca..b"],"actual":{"ok":"$2b$10$......................IqdOqVe1AlmVcQUaAPOUA/HFw888ylW"},"reason":"bcrypt random salt; fixed salt for determinism"}
+{"fn":"hashPassword","args":["emoji \ud83d\udc4d\ud83c\udffd mix"],"actual":{"ok":"$2b$10$......................N8uixfsJoX8q3RiF5R/zOtiBhG34HIq"},"reason":"bcrypt random salt; fixed salt for determinism"}

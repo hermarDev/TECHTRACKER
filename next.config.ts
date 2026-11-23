@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
 
+const rustBackend = process.env.RUST_BACKEND_URL?.replace(/\/$/, "");
+
 const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
@@ -11,6 +13,15 @@ const nextConfig: NextConfig = {
         as: "*.css",
       },
     },
+  },
+  async rewrites() {
+    if (!rustBackend) return [];
+    return [
+      {
+        source: "/api/:path*",
+        destination: `${rustBackend}/api/:path*`,
+      },
+    ];
   },
 };
 

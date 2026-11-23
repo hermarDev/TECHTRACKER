@@ -3,18 +3,15 @@
 import * as React from "react";
 import Link from "next/link";
 import {
-  BookOpenCheck,
   CalendarClock,
   CircleAlert,
   ClipboardCheck,
   Clock,
+  Info,
   FileBarChart2,
   GraduationCap,
   Laptop,
   Layers,
-  MessageSquare,
-  ShieldAlert,
-  Users,
 } from "lucide-react";
 import type { Role } from "@prisma/client";
 
@@ -53,15 +50,11 @@ const INITIAL_METRICS: Metrics = {
   dutyHoursTruncated: false,
 };
 
-const QUICK_LINKS = [
+const QUICK_ACTIONS = [
   { href: "/admin/attendance", label: "Attendance review", description: "Approve, correct, or escalate photo duty logs", icon: CalendarClock },
   { href: "/admin/tasks", label: "Task review", description: "Assign technical tasks and grade submissions", icon: ClipboardCheck },
   { href: "/inspections", label: "Lab audit", description: "Room-by-unit condition inspections", icon: Laptop },
-  { href: "/admin/batches", label: "Batches & schedules", description: "Create and manage duty batches", icon: Layers },
-  { href: "/admin/students", label: "Student directory", description: "Verify accounts and import rosters", icon: Users },
   { href: "/admin/reports", label: "Operational reports", description: "CSV/PDF exports for accreditation", icon: FileBarChart2 },
-  { href: "/messages", label: "Messages", description: "Individual and batch coordination", icon: MessageSquare },
-  { href: "/notifications", label: "Notifications", description: "System alerts and activity notices", icon: BookOpenCheck },
 ];
 
 async function countOf(url: string): Promise<number | null> {
@@ -123,17 +116,7 @@ export default function AdminDashboardPage() {
         if (cancelled) return;
         setUser(meBody.user);
         if (meBody.user.role === "STUDENT") return;
-        try {
-          const notifRes = await fetch("/api/notifications?page=1&pageSize=50");
-          if (!cancelled && notifRes.ok) {
-            const notifBody = (await notifRes.json()) as { data: { isRead: boolean }[] };
-            setUnread(notifBody.data.filter((n) => !n.isRead).length);
-          }
-        } catch {
-          // Notification badge is best-effort in the local prototype.
-        }
-
-        const [studentsTotal, studentsPending, batchesTotal, attendancePending, attendanceEscalated, tasksTotal, assignmentsTotal, inspectionsTotal, inspectionsPendingReview, roomsRes] =
+        const [studentsTotal, studentsPending, batchesTotal, attendancePending, attendanceEscalated, tasksTotal, assignmentsTotal, inspectionsTotal, inspectionsPendingReview, roomsRes, hours, notifications] =
           await Promise.all([
             countOf("/api/admin/students?page=1&pageSize=1"),
             countOf("/api/admin/students?page=1&pageSize=1&status=PENDING_VERIFICATION"),
@@ -145,15 +128,16 @@ export default function AdminDashboardPage() {
             countOf("/api/inspections?page=1&pageSize=1"),
             countOf("/api/inspections?page=1&pageSize=1&status=SUBMITTED"),
             fetch("/api/inspections/rooms").then(
-              (res) =>
-                res.ok
-                  ? (res.json() as Promise<{ rooms: { id: string; name: string; building: string; units: { id: string; unitCode: string; condition: string }[] }[] }>)
-                  : null,
+              (res) => res.ok ? (res.json() as Promise<{ rooms: { id: string; name: string; building: string; units: { id: string; unitCode: string; condition: string }[] }[] }>) : null,
+              () => null,
+            ),
+            sumDutyHours(),
+            fetch("/api/notifications?page=1&pageSize=50").then(
+              (res) => res.ok ? (res.json() as Promise<{ unread?: number; data: { isRead: boolean }[] }>) : null,
               () => null,
             ),
           ]);
-
-        const hours = await sumDutyHours();
+        if (!cancelled && notifications) setUnread(notifications.unread ?? notifications.data.filter((n) => !n.isRead).length);
 
         if (cancelled) return;
         let defectRooms: number | null = null;
@@ -245,19 +229,10 @@ export default function AdminDashboardPage() {
       label: "Lab inspections",
       value: metrics.inspectionsTotal === null ? "—" : String(metrics.inspectionsTotal),
       sub:
-        metrics.inspectionsPendingReview === null
-          ? "All submissions"
-          : `${metrics.inspectionsPendingReview} awaiting coordinator review`,
+        metrics.defectRooms !== null && metrics.flaggedUnits !== null
+          ? `${metrics.defectRooms} defect room${metrics.defectRooms === 1 ? "" : "s"} · ${metrics.flaggedUnits} unit${metrics.flaggedUnits === 1 ? "" : "s"} flagged`
+          : "All submissions",
       icon: Laptop,
-    },
-    {
-      label: "Defect rooms",
-      value: metrics.defectRooms === null ? "—" : String(metrics.defectRooms),
-      sub:
-        metrics.flaggedUnits === null
-          ? "Rooms with flagged units"
-          : `${metrics.flaggedUnits} unit${metrics.flaggedUnits === 1 ? "" : "s"} flagged`,
-      icon: ShieldAlert,
     },
     {
       label: "Students",
@@ -292,11 +267,11 @@ export default function AdminDashboardPage() {
           </Alert>
         )}
 
-        <section aria-label="Summary metrics" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <section aria-label="Summary metrics" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {cards.map((card) => {
             const Icon = card.icon;
             return (
-              <article key={card.label} className="grid gap-1 rounded-xl border border-border bg-card p-4">
+              <article key={card.label} className="grid gap-1 rounded-sm border border-border bg-card p-4">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Icon className="size-4" aria-hidden="true" />
                   {card.label}
@@ -308,33 +283,65 @@ export default function AdminDashboardPage() {
           })}
         </section>
 
-        <section aria-labelledby="quick-links-heading" className="grid gap-3">
-          <h2 id="quick-links-heading" className="text-base font-semibold">
-            Quick navigation
-          </h2>
-          <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {QUICK_LINKS.map((item) => {
-              const Icon = item.icon;
-              return (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    className="flex min-h-20 flex-col justify-center gap-1 rounded-xl border border-border bg-card p-4 transition-colors hover:bg-muted"
-                  >
-                    <span className="flex items-center gap-2 text-sm font-semibold">
-                      <Icon className="size-4 text-muted-foreground" aria-hidden="true" />
-                      {item.label}
-                    </span>
-                    <span className="text-xs text-muted-foreground">{item.description}</span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+        <section aria-label="Overview actions" className="grid gap-4 lg:grid-cols-2">
+          <div className="grid gap-3 rounded-sm border border-border bg-card p-4">
+            <h2 className="text-base font-semibold">Needs attention</h2>
+            <ul className="grid gap-2">
+              <li>
+                <Link
+                  href="/admin/attendance"
+                  className="flex min-h-11 items-center justify-between gap-3 rounded-sm border border-border px-3 py-2 text-sm transition-colors hover:bg-muted"
+                >
+                  <span className="flex items-center gap-2">
+                    <CalendarClock className="size-4 text-muted-foreground" aria-hidden="true" />
+                    Attendance reviews pending
+                  </span>
+                  <span className="flex items-center gap-2 font-semibold tabular-ledger">
+                    {metrics.attendancePending ?? "—"}
+                    <span aria-hidden="true">→</span>
+                  </span>
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/admin/students"
+                  className="flex min-h-11 items-center justify-between gap-3 rounded-sm border border-border px-3 py-2 text-sm transition-colors hover:bg-muted"
+                >
+                  <span className="flex items-center gap-2">
+                    <GraduationCap className="size-4 text-muted-foreground" aria-hidden="true" />
+                    Student verifications pending
+                  </span>
+                  <span className="flex items-center gap-2 font-semibold tabular-ledger">
+                    {metrics.studentsPending ?? "—"}
+                    <span aria-hidden="true">→</span>
+                  </span>
+                </Link>
+              </li>
+            </ul>
+          </div>
+          <div className="grid gap-3 rounded-sm border border-border bg-card p-4">
+            <h2 className="text-base font-semibold">Quick actions</h2>
+            <ul className="grid gap-2 sm:grid-cols-2">
+              {QUICK_ACTIONS.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <li key={item.href}>
+                    <Link
+                      href={item.href}
+                      className="flex min-h-11 items-center gap-2 rounded-sm border border-border px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
+                    >
+                      <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      <span className="truncate">{item.label}</span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         </section>
 
-        <Alert className="border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300">
-          <CircleAlert aria-hidden="true" />
+        <Alert className="border-border bg-muted/50 text-muted-foreground">
+          <Info aria-hidden="true" />
           <AlertTitle>Metrics scope</AlertTitle>
           <AlertDescription>
             Figures cover the batches you coordinate. Duty hours aggregate logged attendance on this device

@@ -2,17 +2,29 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { AppShell } from "@/components/shell/AppShell";
 import { StatusBadge } from "@/components/shell/StatusBadge";
+import { AppShell } from "@/components/shell/AppShell";
 import { DataTablePagination } from "@/components/shell/DataTablePagination";
+import { DataTableToolbar } from "@/components/shell/DataTableToolbar";
 import { toast } from "sonner";
-import { Search, Loader2, Plus, Users, Calendar, Filter } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Loader2, Plus, Users, Calendar } from "lucide-react";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { useDraftForm } from "@/hooks/useDraftForm";
+import { FloatingInput } from "@/components/shell/FloatingInput";
+import { InlineError } from "@/components/shell/InlineError";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 
 type User = { id: string; fullName: string; email: string; role: "ADMIN" | "SUPERADMIN" };
@@ -39,7 +51,7 @@ export default function AdminTasksPage() {
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
   const [students, setStudents] = React.useState<Student[]>([]);
   const [batches, setBatches] = React.useState<Batch[]>([]);
-  const [formData, setFormData] = React.useState({
+  const taskDraft = useDraftForm("techtracker-admin-task-draft", {
     title: "",
     category: "General Technical",
     instructions: "",
@@ -47,33 +59,37 @@ export default function AdminTasksPage() {
     batchId: "",
     studentIds: [] as string[],
   });
+  const formData = taskDraft.values;
+  const setFormData = taskDraft.setValues;
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [studentError, setStudentError] = React.useState("");
 
   React.useEffect(() => {
-    let mounted = true;
-    const doLoad = async () => {
-      const params = new URLSearchParams({
-        page: page.toString(),
-        pageSize: pageSize.toString(),
-        ...(search && { search }),
-        ...(statusFilter && { status: statusFilter }),
-      });
-      const [me, result] = await Promise.all([
-        fetch("/api/auth/me"),
-        fetch(`/api/tasks?${params.toString()}`)
-      ]);
-      if (mounted) {
-        if (me.ok) setUser((await me.json()).user);
-        if (result.ok) {
-          const data = await result.json();
-          setTasks(data.items);
-          setTotal(data.total);
-        }
-        setIsLoading(false);
+    const controller = new AbortController();
+    fetch("/api/auth/me", { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => { if (data) setUser(data.user); })
+      .catch((error) => { if (error.name !== "AbortError") toast.error("Failed to load account"); });
+    return () => controller.abort();
+  }, []);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setIsLoading(true);
+      try {
+        const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize), ...(search && { search }), ...(statusFilter && { status: statusFilter }) });
+        const response = await fetch(`/api/tasks?${params}`, { signal: controller.signal });
+        if (!response.ok) throw new Error("Request failed");
+        const data = await response.json();
+        if (!controller.signal.aborted) { setTasks(data.items); setTotal(data.total ?? data.items.length); }
+      } catch {
+        if (!controller.signal.aborted) toast.error("Failed to load tasks");
+      } finally {
+        if (!controller.signal.aborted) setIsLoading(false);
       }
-    };
-    doLoad();
-    return () => { mounted = false; };
+    }, 250);
+    return () => { window.clearTimeout(timer); controller.abort(); };
   }, [page, pageSize, search, statusFilter]);
 
   React.useEffect(() => {
@@ -81,19 +97,25 @@ export default function AdminTasksPage() {
     if (isDialogOpen) {
       const doLoadDialog = async () => {
         try {
-          const [studentsRes, batchesRes] = await Promise.all([
-            fetch("/api/admin/students?page=1&pageSize=1000"),
-            fetch("/api/admin/batches?page=1&pageSize=1000"),
+          const fetchAll = async <T,>(url: string): Promise<T[]> => {
+            const all: T[] = [];
+            let page = 1;
+            while (true) {
+              const response = await fetch(`${url}?page=${page}&pageSize=50`);
+              if (!response.ok) throw new Error("Failed to load options");
+              const data = await response.json() as { data: T[]; total: number };
+              all.push(...data.data);
+              if (all.length >= data.total || data.data.length === 0) return all;
+              page++;
+            }
+          };
+          const [studentList, batchList] = await Promise.all([
+            fetchAll<Student>("/api/admin/students"),
+            fetchAll<Batch>("/api/admin/batches"),
           ]);
           if (mounted) {
-            if (studentsRes.ok) {
-              const data = await studentsRes.json();
-              setStudents(data.data || []);
-            }
-            if (batchesRes.ok) {
-              const data = await batchesRes.json();
-              setBatches(data.data || []);
-            }
+            setStudents(studentList);
+            setBatches(batchList);
           }
         } catch {
           toast.error("Failed to load dialog data");
@@ -106,9 +128,11 @@ export default function AdminTasksPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.title.trim() || !formData.instructions.trim() || !formData.deadline || formData.studentIds.length === 0) {
-      return toast.error("All fields are required, including at least one student.");
+    if (formData.studentIds.length === 0) {
+      setStudentError("Select at least one student to assign this task.");
+      return;
     }
+    setStudentError("");
     setIsSubmitting(true);
     try {
       const response = await fetch("/api/tasks", {
@@ -119,7 +143,7 @@ export default function AdminTasksPage() {
       if (response.ok) {
         toast.success("Task assigned successfully");
         setIsDialogOpen(false);
-        setFormData({ title: "", category: "General Technical", instructions: "", deadline: "", batchId: "", studentIds: [] });
+        taskDraft.resetAll();
         // Reload tasks by updating a dependency
         const params = new URLSearchParams({
           page: page.toString(),
@@ -154,18 +178,12 @@ export default function AdminTasksPage() {
 
   return (
     <AppShell user={user} title="Task Assignment & Review" subtitle="Assign technical work and review completion reports.">
-      <section className="rounded-xl border border-border bg-card">
-        <CardHeader className="pb-3 flex flex-row items-center justify-between">
-          <div>
-            <CardTitle>Task Assignment & Review</CardTitle>
-            <CardDescription>Assign technical work and review completion reports</CardDescription>
-          </div>
-          <Dialog>
-            <DialogTrigger>
-              <Button>
-                <Plus className="size-4 mr-2" />
-                Assign New Task
-              </Button>
+      <section className="rounded-sm border border-border bg-card p-4 lg:p-5">
+        <div className="flex flex-wrap items-center justify-end gap-2 pb-4 [&_button]:max-w-full [&_button]:whitespace-normal">
+          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <DialogTrigger render={<button type="button" className={buttonVariants()} />}>
+              <Plus className="size-4 mr-2" />
+              Assign New Task
             </DialogTrigger>
             <DialogContent className="max-w-2xl max-h-[90dvh]">
               <DialogHeader>
@@ -174,20 +192,18 @@ export default function AdminTasksPage() {
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="title">Title *</Label>
-                  <Input
+                  <FloatingInput
                     id="title"
+                    label="Title"
                     required
-                    placeholder="Task title"
                     value={formData.title}
                     onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                    className="h-11"
                   />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="category">Category</Label>
                   <Select value={formData.category || ""} onValueChange={(value) => setFormData({ ...formData, category: value || "" })}>
-                    <SelectTrigger className="h-11">
+                    <SelectTrigger id="category" className="h-11">
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
                     <SelectContent>
@@ -202,7 +218,7 @@ export default function AdminTasksPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="instructions">Instructions *</Label>
-                  <textarea
+                  <Textarea
                     id="instructions"
                     required
                     rows={4}
@@ -225,12 +241,12 @@ export default function AdminTasksPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="batchId">Batch (optional)</Label>
-                  <Select value={formData.batchId || ""} onValueChange={(value) => setFormData({ ...formData, batchId: value || "" })}>
-                    <SelectTrigger className="h-11">
+                  <Select value={formData.batchId || "ALL"} onValueChange={(value) => setFormData({ ...formData, batchId: value === "ALL" ? "" : (value ?? "") })}>
+                    <SelectTrigger id="batchId" className="h-11">
                       <SelectValue placeholder="All batches" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All batches</SelectItem>
+                      <SelectItem value="ALL">All batches</SelectItem>
                       {batches.map((batch) => (
                         <SelectItem key={batch.id} value={batch.id}>
                           {batch.name} ({batch.section})
@@ -247,12 +263,15 @@ export default function AdminTasksPage() {
                         <input
                           type="checkbox"
                           checked={formData.studentIds.includes(student.id)}
-                          onChange={(e) => setFormData({
-                            ...formData,
-                            studentIds: e.target.checked
-                              ? [...formData.studentIds, student.id]
-                              : formData.studentIds.filter((id) => id !== student.id)
-                          })}
+                          onChange={(e) => {
+                            setFormData({
+                              ...formData,
+                              studentIds: e.target.checked
+                                ? [...formData.studentIds, student.id]
+                                : formData.studentIds.filter((id) => id !== student.id)
+                            });
+                            setStudentError("");
+                          }}
                         />
                         <span className="text-sm">{student.fullName} <span className="text-muted-foreground">({student.studentIdNo})</span></span>
                       </label>
@@ -260,9 +279,10 @@ export default function AdminTasksPage() {
                     {students.length === 0 && <p className="text-sm text-muted-foreground">No students available</p>}
                   </div>
                   <p className="text-xs text-muted-foreground">{formData.studentIds.length} student(s) selected</p>
+                  {studentError && <InlineError message={studentError} id="students-error" />}
                 </div>
                 <DialogFooter>
-                  <Button variant="outline" type="button" onClick={() => { setIsDialogOpen(false); setFormData({ title: "", category: "General Technical", instructions: "", deadline: "", batchId: "", studentIds: [] }); }}>Cancel</Button>
+                  <Button variant="outline" type="button" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
                   <Button type="submit" disabled={isSubmitting}>
                     {isSubmitting && <Loader2 className="size-4 mr-2 animate-spin" />}
                     Assign Task
@@ -271,31 +291,30 @@ export default function AdminTasksPage() {
               </form>
             </DialogContent>
           </Dialog>
-        </CardHeader>
+        </div>
         <CardContent className="space-y-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input
-                placeholder="Search tasks..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-10 h-11"
-              />
-            </div>
-            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value || "")}>
-              <SelectTrigger className="w-full sm:w-48">
-                <SelectValue placeholder="All statuses" />
-              </SelectTrigger>
-              <SelectContent>
-                {statusOptions.map((status) => (
-                  <SelectItem key={status} value={status === "ALL" ? "" : status}>
-                    {status === "ALL" ? "All Statuses" : status.replace("_", " ")}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <DataTableToolbar
+            search={search}
+            onSearchChange={(value) => { setPage(1); setSearch(value); }}
+            searchPlaceholder="Search tasks..."
+            filters={
+              <Select
+                value={statusFilter || "ALL"}
+                onValueChange={(value) => { setPage(1); setStatusFilter(value === "ALL" ? "" : (value ?? "")); }}
+              >
+                <SelectTrigger size="sm" className="w-40" aria-label="Filter by status">
+                  <SelectValue placeholder="All statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  {statusOptions.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {status === "ALL" ? "All Statuses" : status.replace("_", " ")}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
 
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
@@ -307,46 +326,60 @@ export default function AdminTasksPage() {
             </div>
           ) : (
             <>
-              <div className="grid gap-4">
-                {tasks.map((task) => (
-                  <Link 
-                    href={`/admin/tasks/${task.id}`} 
-                    key={task.id} 
-                    className="rounded-xl border border-border bg-card p-5 hover:bg-muted transition-colors"
-                  >
-                    <div className="flex justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <h2 className="font-semibold truncate">{task.title}</h2>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {task.category} · {task.assignments.length} assigned student(s) · Due {new Date(task.deadline).toLocaleDateString()}
-                        </p>
-                      </div>
-                      <Badge 
-                        variant={
-                          task.assignments[0]?.status === "ACCEPTED" ? "default" :
-                          task.assignments[0]?.status === "RETURNED" ? "destructive" :
-                          task.assignments[0]?.status === "SUBMITTED" ? "secondary" :
-                          "outline"
-                        }
-                        className={
-                          task.assignments[0]?.status === "ACCEPTED" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" :
-                          task.assignments[0]?.status === "RETURNED" ? "bg-destructive/10 text-destructive" :
-                          ""
-                        }
-                      >
-                        {task.assignments[0]?.status?.replace("_", " ") || "ASSIGNED"}
-                      </Badge>
-                    </div>
-                  </Link>
-                ))}
+              <div className="min-w-0 overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Task</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>
+                        <span className="inline-flex items-center gap-1.5">
+                          <Users className="size-4" aria-hidden="true" />
+                          Assignees
+                        </span>
+                      </TableHead>
+                      <TableHead>
+                        <span className="inline-flex items-center gap-1.5">
+                          <Calendar className="size-4" aria-hidden="true" />
+                          Due date
+                        </span>
+                      </TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {tasks.map((task) => {
+                      const status = task.assignments[0]?.status ?? "ASSIGNED";
+                      return (
+                        <TableRow key={task.id}>
+                          <TableCell className="font-medium">
+                            <Link href={`/admin/tasks/${task.id}`} className="hover:underline">
+                              {task.title}
+                            </Link>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">{task.category}</TableCell>
+                          <TableCell className="tabular-ledger">{task.assignments.length}</TableCell>
+                          <TableCell className="tabular-ledger">
+                            {new Date(task.deadline).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge status={status} />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
               </div>
-              <DataTablePagination 
-                page={page} 
-                pageSize={pageSize} 
-                total={total} 
-                onPageChange={setPage} 
-                onPageSizeChange={setPageSize} 
-              />
+              <div className="min-w-0 max-w-full [&_div]:flex-wrap [&_button]:max-w-full [&_button]:whitespace-normal">
+                <DataTablePagination
+                  page={page}
+                  pageSize={pageSize}
+                  total={total}
+                  onPageChange={setPage}
+                  onPageSizeChange={(size) => { setPage(1); setPageSize(size); }}
+                />
+              </div>
             </>
           )}
         </CardContent>

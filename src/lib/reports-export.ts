@@ -1,4 +1,4 @@
-import { unparse } from "papaparse";
+import * as Papa from "papaparse";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -28,7 +28,7 @@ export function generateCsv(rows: readonly CsvRow[]): string {
   const safeRows = rows.map((row) =>
     Object.fromEntries(Object.entries(row).map(([k, v]) => [k, sanitizeCsvCell(v)]))
   );
-  return unparse(safeRows);
+  return Papa.unparse(safeRows);
 }
 
 export function generateCsvWithFields<T extends object>(
@@ -45,7 +45,7 @@ export function generateCsvWithFields<T extends object>(
     }
     return out;
   });
-  return unparse({ fields: [...fields], data: projected });
+  return Papa.unparse({ fields: [...fields], data: projected });
 }
 
 // ---------------------------------------------------------------------------

@@ -57,7 +57,8 @@ export function useDraftForm<T extends Record<string, unknown>>(
     }
     setIsDirty(false);
     setRestoredDraft(false);
-  }, [storageKey]);
+    setValues(initialValue);
+  }, [storageKey, initialValue]);
 
   React.useEffect(() => {
     if (!isDirty) return;

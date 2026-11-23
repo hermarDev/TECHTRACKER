@@ -1,5 +1,6 @@
 "use client";
 
+import { BrandLogo } from "./BrandLogo";
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -52,7 +53,7 @@ function getNavForRole(role: Role): NavItem[] {
       { href: "/admin/students", label: "Directory", icon: Users },
       { href: "/admin/reports", label: "Reports", icon: FileBarChart2 },
       { href: "/notifications", label: "Alerts", icon: Bell },
-      { href: "/profile", label: "Account settings", icon: UserCircle },
+      { href: "/profile", label: "Account Settings", icon: UserCircle },
     ];
   }
   if (role === "ADMIN") {
@@ -65,7 +66,7 @@ function getNavForRole(role: Role): NavItem[] {
       { href: "/admin/students", label: "Directory", icon: Users },
       { href: "/admin/reports", label: "Reports", icon: FileBarChart2 },
       { href: "/messages", label: "Messages", icon: MessageSquare },
-      { href: "/profile", label: "Account settings", icon: UserCircle },
+      { href: "/profile", label: "Account Settings", icon: UserCircle },
     ];
   }
   // STUDENT (04W Student Nav: Home, Attendance, Tasks, Lab Audit, Chat, Account settings)
@@ -75,13 +76,13 @@ function getNavForRole(role: Role): NavItem[] {
     { href: "/tasks", label: "Tasks", icon: ClipboardCheck },
     { href: "/inspections", label: "Lab Audit", icon: Laptop },
     { href: "/messages", label: "Chat", icon: MessageSquare },
-    { href: "/profile", label: "Account settings", icon: UserCircle },
+    { href: "/profile", label: "Account Settings", icon: UserCircle },
   ];
 }
 
 export function AppShell({
   user,
-  unreadNotifications = 0,
+  unreadNotifications,
   title,
   subtitle,
   actions,
@@ -98,9 +99,28 @@ export function AppShell({
   const router = useRouter();
   const [loggingOut, setLoggingOut] = React.useState(false);
   const [moreOpen, setMoreOpen] = React.useState(false);
+  const [fallbackUnread, setFallbackUnread] = React.useState(0);
+  React.useEffect(() => {
+    if (unreadNotifications !== undefined) return;
+    const controller = new AbortController();
+    const refresh = async () => {
+      try {
+        const response = await fetch("/api/notifications?page=1&pageSize=50", { signal: controller.signal });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!controller.signal.aborted) setFallbackUnread(typeof data.unread === "number" ? data.unread : (data.data ?? data.items ?? []).filter((item: { isRead: boolean }) => !item.isRead).length);
+      } catch { /* An unavailable count must not block navigation. */ }
+    };
+    void refresh();
+    const onVisibility = () => { if (document.visibilityState === "visible") void refresh(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { controller.abort(); document.removeEventListener("visibilitychange", onVisibility); };
+  }, [unreadNotifications]);
+  const unread = unreadNotifications ?? fallbackUnread;
   const navItems = React.useMemo(() => getNavForRole(user.role), [user.role]);
   const mobilePrimary = navItems.slice(0, 4);
   const mobileOverflow = navItems.slice(4);
+  const overflowActive = mobileOverflow.some((item) => pathname === item.href || pathname.startsWith(item.href + "/"));
 
   const handleLogout = async () => {
     setLoggingOut(true);
@@ -123,18 +143,16 @@ export function AppShell({
   return (
     <div className="flex min-h-screen w-full bg-background text-foreground">
       {/* Desktop Institutional Rail */}
-      <aside className="hidden lg:flex lg:w-64 lg:shrink-0 lg:flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
-        <div className="flex h-16 items-center gap-3 border-b border-sidebar-border px-5">
-          <div className="flex size-9 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground font-mono text-sm font-semibold">
-            TT
-          </div>
+      <aside className="hidden lg:flex lg:w-64 lg:shrink-0 lg:flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground h-screen sticky top-0 overflow-hidden">
+        <div className="flex h-16 shrink-0 items-center gap-3 border-b border-sidebar-border px-5">
+          <BrandLogo aria-hidden="true" />
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold tracking-tight">TechTracker</p>
             <p className="truncate text-[11px] text-sidebar-foreground/70">ACLC Mandaue BSIT</p>
           </div>
         </div>
 
-        <nav className="flex-1 space-y-1 p-3" aria-label="Primary navigation">
+        <nav className="flex-1 space-y-1 overflow-y-auto p-3" aria-label="Primary navigation">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active =
@@ -149,7 +167,7 @@ export function AppShell({
                 href={item.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  "flex min-h-11 items-center gap-3 rounded-sm px-3 py-2 text-sm font-medium transition-colors",
                   active
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
                     : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
@@ -162,7 +180,7 @@ export function AppShell({
           })}
         </nav>
 
-        <div className="border-t border-sidebar-border p-4 space-y-3">
+        <div className="shrink-0 border-t border-sidebar-border p-4 space-y-3">
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">{user.fullName}</p>
             <p className="truncate text-xs text-sidebar-foreground/70">{roleLabel}</p>
@@ -182,24 +200,24 @@ export function AppShell({
 
       {/* Main Content Workspace */}
       <div className="flex min-w-0 flex-1 flex-col pb-20 lg:pb-0">
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-border bg-background/95 px-4 backdrop-blur-sm lg:px-8">
+        <header className="sticky top-0 z-30 flex h-auto min-h-16 flex-wrap items-center justify-between gap-3 border-b border-border bg-background/95 px-4 py-2 lg:px-8">
           <div className="min-w-0">
             <h1 className="truncate text-lg font-semibold tracking-tight lg:text-xl">{title}</h1>
             {subtitle && (
               <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
             )}
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 [&_button]:max-w-full [&_button]:whitespace-normal">
             {actions}
             <Link
               href="/notifications"
-              aria-label={`Notifications (${unreadNotifications} unread)`}
-              className="relative inline-flex size-11 items-center justify-center rounded-lg border border-border bg-card text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={`Notifications (${unread} unread)`}
+              className="relative inline-flex size-11 items-center justify-center rounded-sm border border-border bg-card text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Bell className="size-4" />
-              {unreadNotifications > 0 && (
+              {unread > 0 && (
                 <span className="absolute right-1.5 top-1.5 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground tabular-ledger">
-                  {unreadNotifications > 99 ? "99+" : unreadNotifications}
+                  {unread > 99 ? "99+" : unread}
                 </span>
               )}
             </Link>
@@ -213,7 +231,7 @@ export function AppShell({
       {/* Mobile Bottom Navigation */}
       <nav
         aria-label="Mobile navigation"
-        className="fixed inset-x-0 bottom-0 z-40 flex h-16 items-center justify-around border-t border-border bg-card/95 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 flex h-16 items-center justify-around border-t border-border bg-card/95 px-2 pb-[env(safe-area-inset-bottom)] lg:hidden"
       >
         {mobilePrimary.map((item) => {
           const Icon = item.icon;
@@ -229,12 +247,12 @@ export function AppShell({
               href={item.href}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "flex min-h-11 min-w-14 flex-col items-center justify-center gap-0.5 rounded-md px-2 text-[11px] font-medium",
+                "flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-md px-0.5 text-[11px] font-medium",
                 active ? "text-primary" : "text-muted-foreground hover:text-foreground"
               )}
             >
               <Icon className="size-4" aria-hidden="true" />
-              <span className="truncate max-w-16">{item.shortLabel ?? item.label}</span>
+              <span className="truncate max-w-full">{item.shortLabel ?? item.label}</span>
             </Link>
           );
         })}
@@ -244,7 +262,7 @@ export function AppShell({
             render={
               <button
                 type="button"
-                className="flex min-h-11 min-w-14 flex-col items-center justify-center gap-0.5 rounded-md px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                className={cn("flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-md px-0.5 text-[11px] font-medium", overflowActive ? "text-primary" : "text-muted-foreground hover:text-foreground")}
               />
             }
           >
@@ -265,7 +283,7 @@ export function AppShell({
                     key={item.href}
                     href={item.href}
                     onClick={() => setMoreOpen(false)}
-                    className="flex min-h-11 items-center gap-3 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+                    className="flex min-h-11 items-center gap-3 rounded-sm border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
                   >
                     <Icon className="size-4" />
                     <span>{item.label}</span>

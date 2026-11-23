@@ -6,8 +6,8 @@ import { StatusBadge } from "@/components/shell/StatusBadge";
 import { DataTablePagination } from "@/components/shell/DataTablePagination";
 import { useDraftForm } from "@/hooks/useDraftForm";
 import { toast } from "sonner";
-import { Camera, Download, Image, CheckCircle2, CircleAlert, Loader2, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Camera, Download, Image as ImageIcon, CheckCircle2, CircleAlert, Loader2, X } from "lucide-react";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,6 +34,7 @@ type Schedule = { id: string; label: string; startTime: string; endTime: string;
 export default function AttendancePage() {
   const [user, setUser] = React.useState<User | null>(null);
   const [items, setItems] = React.useState<Attendance[]>([]);
+  const [total, setTotal] = React.useState(0);
   const [schedules, setSchedules] = React.useState<Schedule[]>([]);
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(15);
@@ -58,6 +59,7 @@ export default function AttendancePage() {
       if (attendance.ok) {
         const data = await attendance.json();
         setItems(data.items);
+        setTotal(data.total ?? data.items.length);
         setSchedules(data.schedules || []);
       }
     } catch (error) {
@@ -79,6 +81,7 @@ export default function AttendancePage() {
         if (attendance.ok) {
           const data = await attendance.json();
           setItems(data.items);
+          setTotal(data.total ?? data.items.length);
           setSchedules(data.schedules || []);
         }
         setIsLoading(false);
@@ -108,6 +111,15 @@ export default function AttendancePage() {
     }
     setIsCameraOpen(false);
     setCapturedPhoto(null);
+  };
+
+  // Every close path (Escape, overlay, close button) must release the camera.
+  const handleCameraOpenChange = (open: boolean) => {
+    if (open) {
+      void openCamera();
+    } else {
+      closeCamera();
+    }
   };
 
   const takePhoto = async () => {
@@ -180,8 +192,8 @@ export default function AttendancePage() {
   return (
     <AppShell user={user} title="Attendance" subtitle="Photo-assisted duty log; no location tracking.">
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
-        <section className="rounded-xl border border-border bg-card">
-          <CardHeader className="pb-3">
+        <section className="rounded-sm border border-border bg-card p-4 lg:p-5">
+          <CardHeader className="pb-4">
             <CardTitle>Record duty</CardTitle>
             <CardDescription>Use the camera or choose an image file. GPS is never requested.</CardDescription>
           </CardHeader>
@@ -217,12 +229,18 @@ export default function AttendancePage() {
               <Label>Evidence photo</Label>
               <div className="flex flex-col gap-2">
                 <div className="flex gap-2">
-                  <Dialog>
-                    <DialogTrigger>
-                      <Button variant="outline" onClick={openCamera} disabled={isCameraOpen}>
-                        <Camera className="size-4 mr-2" />
-                        Open Camera
-                      </Button>
+                  <Dialog open={isCameraOpen} onOpenChange={handleCameraOpenChange}>
+                    <DialogTrigger
+                      render={
+                        <button
+                          type="button"
+                          className={buttonVariants({ variant: "outline" })}
+                          disabled={isCameraOpen}
+                        />
+                      }
+                    >
+                      <Camera className="size-4 mr-2" />
+                      Open Camera
                     </DialogTrigger>
                     <DialogContent className="max-w-sm max-h-[90dvh]">
                       <DialogHeader>
@@ -249,7 +267,7 @@ export default function AttendancePage() {
                     </DialogContent>
                   </Dialog>
                   <Button variant="outline" onClick={() => document.getElementById("photo-upload")?.click()}>
-                    <Image className="size-4 mr-2" />
+                    <ImageIcon className="size-4 mr-2" />
                     Choose File
                   </Button>
                 </div>
@@ -288,8 +306,8 @@ export default function AttendancePage() {
           </CardContent>
         </section>
 
-        <section className="rounded-xl border border-border bg-card">
-          <CardHeader className="pb-3 flex flex-wrap items-center justify-between gap-3">
+        <section className="rounded-sm border border-border bg-card p-4 lg:p-5">
+          <CardHeader className="pb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <CardTitle>My attendance</CardTitle>
               <CardDescription>
@@ -299,16 +317,13 @@ export default function AttendancePage() {
               </CardDescription>
             </div>
             {user.preOjtCompleted ? (
-              <Button
-                variant="outline"
-                size="sm"
-                render={
-                  <a href={`/api/attendance/accreditation-pdf?studentId=${user.id}`} className="inline-flex items-center gap-1" />
-                }
+              <a
+                href={`/api/attendance/accreditation-pdf?studentId=${user.id}`}
+                className={buttonVariants({ variant: "outline", size: "sm" })}
               >
                 <Download className="size-3" />
                 Download Accreditation Log (PDF)
-              </Button>
+              </a>
             ) : (
               <Button variant="outline" size="sm" disabled title="Requires 100 credited hours and all assigned tasks accepted">
                 <Download className="size-3" />
@@ -364,12 +379,12 @@ export default function AttendancePage() {
                     </div>
                   ))}
                 </div>
-                <DataTablePagination 
-                  page={page} 
-                  pageSize={pageSize} 
-                  total={items.length} 
-                  onPageChange={setPage} 
-                  onPageSizeChange={setPageSize} 
+                <DataTablePagination
+                  page={page}
+                  pageSize={pageSize}
+                  total={total}
+                  onPageChange={setPage}
+                  onPageSizeChange={setPageSize}
                 />
               </>
             )}

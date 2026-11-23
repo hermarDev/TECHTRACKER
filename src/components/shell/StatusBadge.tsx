@@ -17,42 +17,42 @@ const STATUS_MAP: Record<
 > = {
   APPROVED: {
     label: "Approved",
-    className: "border-emerald-500/35 bg-emerald-500/12 text-emerald-700 dark:text-emerald-300",
+    className: "border-success-surface/35 bg-success-surface/12 text-success",
     icon: "check",
   },
   ACCEPTED: {
     label: "Accepted",
-    className: "border-emerald-500/35 bg-emerald-500/12 text-emerald-700 dark:text-emerald-300",
+    className: "border-success-surface/35 bg-success-surface/12 text-success",
     icon: "check",
   },
   ACTIVE: {
     label: "Active",
-    className: "border-emerald-500/35 bg-emerald-500/12 text-emerald-700 dark:text-emerald-300",
+    className: "border-success-surface/35 bg-success-surface/12 text-success",
     icon: "check",
   },
   FUNCTIONING: {
     label: "Functioning",
-    className: "border-emerald-500/35 bg-emerald-500/12 text-emerald-700 dark:text-emerald-300",
+    className: "border-success-surface/35 bg-success-surface/12 text-success",
     icon: "check",
   },
   PENDING: {
     label: "Pending Review",
-    className: "border-amber-500/40 bg-amber-500/12 text-amber-800 dark:text-amber-300",
+    className: "border-warning-surface/40 bg-warning-surface/12 text-warning",
     icon: "clock",
   },
   PENDING_VERIFICATION: {
     label: "Pending Verification",
-    className: "border-amber-500/40 bg-amber-500/12 text-amber-800 dark:text-amber-300",
+    className: "border-warning-surface/40 bg-warning-surface/12 text-warning",
     icon: "clock",
   },
   SUBMITTED: {
     label: "Submitted",
-    className: "border-blue-500/40 bg-blue-500/12 text-blue-700 dark:text-blue-300",
+    className: "border-info-surface/40 bg-info-surface/12 text-info",
     icon: "clock",
   },
   IN_PROGRESS: {
     label: "In Progress",
-    className: "border-blue-500/40 bg-blue-500/12 text-blue-700 dark:text-blue-300",
+    className: "border-info-surface/40 bg-info-surface/12 text-info",
     icon: "clock",
   },
   ASSIGNED: {
@@ -62,17 +62,17 @@ const STATUS_MAP: Record<
   },
   RETURNED: {
     label: "Returned",
-    className: "border-amber-500/40 bg-amber-500/14 text-amber-800 dark:text-amber-300",
+    className: "border-warning-surface/40 bg-warning-surface/14 text-warning",
     icon: "return",
   },
   IRREGULAR: {
     label: "Irregular",
-    className: "border-amber-500/40 bg-amber-500/14 text-amber-800 dark:text-amber-300",
+    className: "border-warning-surface/40 bg-warning-surface/14 text-warning",
     icon: "warn",
   },
   NEEDS_MAINTENANCE: {
     label: "Needs Maintenance",
-    className: "border-amber-500/40 bg-amber-500/14 text-amber-800 dark:text-amber-300",
+    className: "border-warning-surface/40 bg-warning-surface/14 text-warning",
     icon: "wrench",
   },
   NEEDS_REPAIR: {
@@ -97,17 +97,17 @@ const STATUS_MAP: Record<
   },
   ESCALATED: {
     label: "Escalated",
-    className: "border-amber-600/40 bg-amber-500/15 text-amber-800 dark:text-amber-300",
+    className: "border-warning-surface/40 bg-warning-surface/15 text-warning",
     icon: "shield",
   },
   OPEN: {
     label: "Open",
-    className: "border-amber-500/40 bg-amber-500/14 text-amber-800 dark:text-amber-300",
+    className: "border-warning-surface/40 bg-warning-surface/14 text-warning",
     icon: "warn",
   },
   REVIEWED: {
     label: "Reviewed",
-    className: "border-emerald-500/35 bg-emerald-500/12 text-emerald-700 dark:text-emerald-300",
+    className: "border-success-surface/35 bg-success-surface/12 text-success",
     icon: "check",
   },
 };

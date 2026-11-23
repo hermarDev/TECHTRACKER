@@ -19,6 +19,10 @@ export const metadata: Metadata = {
   title: "TechTracker — Pre-OJT & Lab Monitoring | ACLC College of Mandaue",
   description:
     "Web and mobile-backed 100-hour technical Pre-OJT monitoring and computer laboratory equipment condition tracking for BSIT students.",
+  icons: {
+    icon: "/favicon.svg",
+    shortcut: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
@@ -41,7 +45,7 @@ export default function RootLayout({
       </head>
       <body className="min-h-full flex flex-col bg-background text-foreground">
         {children}
-        <Toaster position="bottom-right" richColors closeButton />
+        <Toaster position="top-center" richColors closeButton />
       </body>
     </html>
   );

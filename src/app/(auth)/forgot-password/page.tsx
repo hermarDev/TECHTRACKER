@@ -1,19 +1,20 @@
 "use client";
 
+import { BrandLogo } from "@/components/shell/BrandLogo";
 import * as React from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { CheckCircle2, CircleAlert, KeyRound, MailQuestion } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FloatingInput } from "@/components/shell/FloatingInput";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
   const [sent, setSent] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -49,9 +50,7 @@ export default function ForgotPasswordPage() {
     <div className="flex min-h-screen flex-1 items-center justify-center bg-muted/40 px-4 py-10">
       <div className="w-full max-w-md space-y-6">
         <div className="text-center">
-          <div className="mx-auto flex size-12 items-center justify-center rounded-lg bg-primary font-mono text-base font-semibold text-primary-foreground">
-            TT
-          </div>
+          <BrandLogo className="mx-auto size-12" />
           <h1 className="mt-4 text-2xl font-semibold tracking-tight">Password Recovery</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Reset links are single-use and expire after 1 hour.
@@ -62,14 +61,14 @@ export default function ForgotPasswordPage() {
           <CardHeader>
             <CardTitle>Forgot your password?</CardTitle>
             <CardDescription>
-              Enter your registered institutional email and we will send a reset link.
+              Enter your registered email and we will send a reset link.
             </CardDescription>
           </CardHeader>
           <CardContent>
             {sent ? (
               <div
                 role="status"
-                className="flex items-start gap-2.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3.5 py-3 text-sm text-emerald-700 dark:text-emerald-300"
+                className="flex items-start gap-2.5 rounded-sm border border-success-surface/40 bg-success-surface/10 px-3.5 py-3 text-sm text-success"
               >
                 <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                 <div className="space-y-1">
@@ -92,7 +91,7 @@ export default function ForgotPasswordPage() {
                 {error && (
                   <div
                     role="alert"
-                    className="mb-4 flex items-start gap-2.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
+                    className="mb-4 flex items-start gap-2.5 rounded-sm border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
                   >
                     <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                     <span>{error}</span>
@@ -100,14 +99,12 @@ export default function ForgotPasswordPage() {
                 )}
                 <form onSubmit={handleSubmit} className="space-y-4" noValidate>
                   <div className="space-y-2">
-                    <Label htmlFor="email">Email address</Label>
-                    <Input
+                    <FloatingInput
                       id="email"
                       type="email"
                       required
                       autoComplete="email"
-                      placeholder="Institutional email address"
-                      className="h-11"
+                      label="Email address"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       aria-invalid={Boolean(error)}
@@ -131,7 +128,7 @@ export default function ForgotPasswordPage() {
         </p>
 
         <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground/80">
-          <KeyRound className="size-3.5" aria-hidden="true" />
+          <KeyRound className="size-4" aria-hidden="true" />
           For your security, the response is identical whether or not the account exists.
         </p>
       </div>

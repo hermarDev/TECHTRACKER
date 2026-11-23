@@ -20,6 +20,7 @@ const profileUpdateSchema = z.object({
 });
 
 export async function GET(request: Request) {
+  void request;
   const auth = await requireApiSession();
   if (!auth.ok) return auth.response;
 

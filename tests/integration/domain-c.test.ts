@@ -59,7 +59,6 @@ function lastStatus(call: [any, any?] | undefined) {
 let superadminId = "";
 let adminId = "";
 let studentId = "";
-let batchAId = "";
 let roomLab1Id = "";
 let roomLab1UnitIds: string[] = [];
 let roomLab2Id = "";
@@ -73,23 +72,23 @@ beforeAll(async () => {
   const superadmin = await db.user.findUnique({ where: { email: "superadmin@aclc-mandaue.edu.ph" } });
   const admin = await db.user.findUnique({ where: { email: "coordinator@aclc-mandaue.edu.ph" } });
   const student = await db.user.findUnique({ where: { email: "edrich.bardilas@student.aclc.edu.ph" } });
-  const batchA = await db.batch.findUnique({ where: { name: "BSIT-4A Batch 2026-1" } });
   const lab1 = await db.labRoom.findUnique({ where: { name: "Computer Lab 1" }, include: { units: { orderBy: { unitCode: "asc" } } } });
   const lab2 = await db.labRoom.findUnique({ where: { name: "Computer Lab 2" }, include: { units: { orderBy: { unitCode: "asc" } } } });
-  const conv = await db.conversation.findUnique({ where: { id: "d8eab1c0-e7ac-4577-a7be-29451843f791" } });
+  if (!admin || !student) throw new Error("Seed data missing: coordinator or student");
+  const conv = await db.conversation.findFirst({ where: { AND: [{ members: { some: { userId: admin.id } } }, { members: { some: { userId: student.id } } }] } });
+  if (!conv) throw new Error("Seed data missing: coordinator and student conversation");
   const esc = await db.escalationCase.findFirst();
   const nonMemberStudent = await db.user.findFirst({
     where: {
       role: "STUDENT",
       status: "ACTIVE",
-      conversationMembers: { none: { conversationId: "d8eab1c0-e7ac-4577-a7be-29451843f791" } },
+      conversationMembers: { none: { conversationId: conv.id } },
     },
   });
 
   superadminId = superadmin!.id;
   adminId = admin!.id;
   studentId = student!.id;
-  batchAId = batchA!.id;
   roomLab1Id = lab1!.id;
   roomLab1UnitIds = lab1!.units.map((u) => u.id);
   roomLab2Id = lab2!.id;
@@ -339,7 +338,8 @@ describe("Domain C — POST /api/messages (SuperAdmin blocked)", () => {
   it("returns 403 when SuperAdmin attempts to GET conversations", async () => {
     await authAs("SUPERADMIN", superadminId);
     const { GET } = await import("@/app/api/messages/route");
-    await GET();
+    const req = new Request("http://localhost/api/messages");
+    await GET(req as any);
     expect(lastStatus(mockJson.mock.lastCall)).toBe(403);
   });
   it("returns 403 when SuperAdmin attempts to send a message", async () => {

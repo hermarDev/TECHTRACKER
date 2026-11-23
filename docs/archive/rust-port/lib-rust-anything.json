@@ -1,0 +1,700 @@
+{
+  "schema": "rust-anything/bridge@1",
+  "root": "/home/hrmr/Documents/CAPSTONE_TEACHTRACKER/Tech_Tracker",
+  "unit": "src/lib/",
+  "language": "ts",
+  "kind": "napi",
+  "crate_name": "lib-rs",
+  "exports": [
+    {
+      "name": "writeAuditLog",
+      "file": "src/lib/audit.ts",
+      "line": 4,
+      "params": [
+        {
+          "name": "params",
+          "ts_type": "{\n  actorId?: string | null;\n  action: string;\n  entityType: string;\n  entityId: string;\n  details?: Prisma.InputJsonValue;\n}",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "unknown",
+      "is_async": true,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "queueEmailOutbox",
+      "file": "src/lib/audit.ts",
+      "line": 22,
+      "params": [
+        {
+          "name": "params",
+          "ts_type": "{\n  toEmail: string;\n  subject: string;\n  body: string;\n  category: \"VERIFICATION\" | \"PASSWORD_RESET\" | \"SECURITY_ALERT\";\n}",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "unknown",
+      "is_async": true,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "requirePageUser",
+      "file": "src/lib/auth-server-props.ts",
+      "line": 7,
+      "params": [
+        {
+          "name": "allowedRoles",
+          "ts_type": "Role[]",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "unknown",
+      "is_async": true,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "hashPassword",
+      "file": "src/lib/auth.ts",
+      "line": 31,
+      "params": [
+        {
+          "name": "plain",
+          "ts_type": "string",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>",
+      "is_async": true,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "verifyPassword",
+      "file": "src/lib/auth.ts",
+      "line": 35,
+      "params": [
+        {
+          "name": "plain",
+          "ts_type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "hash",
+          "ts_type": "string",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<boolean>",
+      "is_async": true,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "signSessionJwt",
+      "file": "src/lib/auth.ts",
+      "line": 39,
+      "params": [
+        {
+          "name": "payload",
+          "ts_type": "SessionPayload",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<string>",
+      "is_async": true,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "verifySessionJwt",
+      "file": "src/lib/auth.ts",
+      "line": 53,
+      "params": [
+        {
+          "name": "token",
+          "ts_type": "string",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<SessionPayload | null>",
+      "is_async": true,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "getSessionFromCookies",
+      "file": "src/lib/auth.ts",
+      "line": 69,
+      "params": [],
+      "returns": "Promise<SessionPayload | null>",
+      "is_async": true,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "createOpaqueToken",
+      "file": "src/lib/auth.ts",
+      "line": 76,
+      "params": [],
+      "returns": "{ raw: string; hash: string }",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "hashToken",
+      "file": "src/lib/auth.ts",
+      "line": 82,
+      "params": [
+        {
+          "name": "raw",
+          "ts_type": "string",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "string",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "evaluateLockoutState",
+      "file": "src/lib/auth.ts",
+      "line": 86,
+      "params": [
+        {
+          "name": "failedLoginCount",
+          "ts_type": "number",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "lockedUntil",
+          "ts_type": "Date | null",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "now",
+          "ts_type": "Date",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "{ isLocked: boolean; remainingMinutes: number }",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "nextFailureState",
+      "file": "src/lib/auth.ts",
+      "line": 98,
+      "params": [
+        {
+          "name": "currentFailCount",
+          "ts_type": "number",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "now",
+          "ts_type": "Date",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "{\n  failedLoginCount: number;\n  lockedUntil: Date | null;\n  triggeredLock: boolean;\n  remainingAttempts: number;\n}",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "calculateSessionHours",
+      "file": "src/lib/hours.ts",
+      "line": 1,
+      "params": [
+        {
+          "name": "timeIn",
+          "ts_type": "Date",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "timeOut",
+          "ts_type": "Date | null",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "number",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "parseTimeToMinutes",
+      "file": "src/lib/hours.ts",
+      "line": 8,
+      "params": [
+        {
+          "name": "hhmm",
+          "ts_type": "string",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "number",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "evaluateScheduleWindow",
+      "file": "src/lib/hours.ts",
+      "line": 14,
+      "params": [
+        {
+          "name": "params",
+          "ts_type": "{\n  timeIn: Date;\n  scheduleStart: string;\n  scheduleEnd: string;\n  graceMinutes: number;\n}",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "{ isIrregular: boolean; irregularReason: string | null }",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "computeHoursProgress",
+      "file": "src/lib/hours.ts",
+      "line": 39,
+      "params": [
+        {
+          "name": "params",
+          "ts_type": "{\n  logs: Array<{ status: string; recordedHours: number; creditedHours: number }>;\n  requiredHours: number;\n  allAssignedTasksAccepted: boolean;\n}",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "unknown",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "generateAccreditationPdf",
+      "file": "src/lib/pdf-accreditation.ts",
+      "line": 20,
+      "params": [
+        {
+          "name": "student",
+          "ts_type": "AccreditationStudent",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "logs",
+          "ts_type": "AccreditationAttendance[]",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "Uint8Array",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "roleDashboardPath",
+      "file": "src/lib/rbac.ts",
+      "line": 10,
+      "params": [
+        {
+          "name": "role",
+          "ts_type": "Role",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "string",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "requireApiSession",
+      "file": "src/lib/rbac.ts",
+      "line": 22,
+      "params": [
+        {
+          "name": "allowedRoles",
+          "ts_type": "Role[]",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<(| { ok: true; session: SessionPayload; user: { id: string; role: Role; status: string; batchId: string | null; fullName: string; email: string } }\n  | { ok: false; response: NextResponse })>",
+      "is_async": true,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "canAccessBatchScope",
+      "file": "src/lib/rbac.ts",
+      "line": 66,
+      "params": [
+        {
+          "name": "actor",
+          "ts_type": "{ id: string; role: Role; batchId: string | null }",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "targetBatchId",
+          "ts_type": "string | null",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<boolean>",
+      "is_async": true,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "canAccessStudentRecord",
+      "file": "src/lib/rbac.ts",
+      "line": 82,
+      "params": [
+        {
+          "name": "actor",
+          "ts_type": "{ id: string; role: Role }",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "recordStudentId",
+          "ts_type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "batchCoordinatorId",
+          "ts_type": "string | null",
+          "optional": true,
+          "rest": false
+        }
+      ],
+      "returns": "boolean",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "canInspectRoom",
+      "file": "src/lib/rbac.ts",
+      "line": 95,
+      "params": [
+        {
+          "name": "actor",
+          "ts_type": "{ id: string; role: Role }",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "room",
+          "ts_type": "{ assignedAdminId: string | null; assignedStudentId: string | null }",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "boolean",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "canUseMessaging",
+      "file": "src/lib/rbac.ts",
+      "line": 106,
+      "params": [
+        {
+          "name": "role",
+          "ts_type": "Role",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "boolean",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "generateCsv",
+      "file": "src/lib/reports-export.ts",
+      "line": 26,
+      "params": [
+        {
+          "name": "rows",
+          "ts_type": "readonly Record<string, unknown>[]",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "string",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "generatePdf",
+      "file": "src/lib/reports-export.ts",
+      "line": 61,
+      "params": [
+        {
+          "name": "options",
+          "ts_type": "PdfOptions",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "Buffer",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "generateInspectionSummaryCsv",
+      "file": "src/lib/reports-export.ts",
+      "line": 100,
+      "params": [
+        {
+          "name": "rows",
+          "ts_type": "InspectionSummaryRow[]",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "string",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "generateInspectionSummaryPdf",
+      "file": "src/lib/reports-export.ts",
+      "line": 113,
+      "params": [
+        {
+          "name": "rows",
+          "ts_type": "InspectionSummaryRow[]",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "Buffer",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "generateOperationalReportCsv",
+      "file": "src/lib/reports-export.ts",
+      "line": 147,
+      "params": [
+        {
+          "name": "rows",
+          "ts_type": "OperationalReportRow[]",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "string",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "generateOperationalReportPdf",
+      "file": "src/lib/reports-export.ts",
+      "line": 152,
+      "params": [
+        {
+          "name": "rows",
+          "ts_type": "OperationalReportRow[]",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "Buffer",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "getStorageRoot",
+      "file": "src/lib/storage.ts",
+      "line": 21,
+      "params": [],
+      "returns": "string",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "validateUploadFile",
+      "file": "src/lib/storage.ts",
+      "line": 25,
+      "params": [
+        {
+          "name": "file",
+          "ts_type": "{ size: number; type: string; name?: string }",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "{\n  ok: true;\n} | {\n  ok: false;\n  error: string;\n}",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "saveUploadedObject",
+      "file": "src/lib/storage.ts",
+      "line": 46,
+      "params": [
+        {
+          "name": "category",
+          "ts_type": "\"attendance\" | \"tasks\" | \"inspections\" | \"messages\"",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "file",
+          "ts_type": "File",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "Promise<{ key: string; name: string; mime: string; size: number }>",
+      "is_async": true,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "resolveSafeStoragePath",
+      "file": "src/lib/storage.ts",
+      "line": 68,
+      "params": [
+        {
+          "name": "key",
+          "ts_type": "string",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "string",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "mimeFromStorageKey",
+      "file": "src/lib/storage.ts",
+      "line": 81,
+      "params": [
+        {
+          "name": "key",
+          "ts_type": "string",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "string",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "normalizePagination",
+      "file": "src/lib/validation.ts",
+      "line": 6,
+      "params": [
+        {
+          "name": "pageParam",
+          "ts_type": "string | number | null | undefined",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "pageSizeParam",
+          "ts_type": "string | number | null | undefined",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "{ page: number; pageSize: (typeof ALLOWED_PAGE_SIZES)[number]; skip: number; take: (typeof ALLOWED_PAGE_SIZES)[number] }",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    }
+  ],
+  "classes": [],
+  "js_only": [
+    {
+      "name": "generateCsvWithFields",
+      "file": "src/lib/reports-export.ts",
+      "line": 34,
+      "reason": "generic over `T`: values of any shape, functions included"
+    }
+  ]
+}
