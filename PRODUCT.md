@@ -8,7 +8,7 @@ web
 
 ## Stack
 
-delegated + Charter-specified: Next.js 16 (App Router, TypeScript, React 19) frontend, Tailwind CSS 4, shadcn/ui (base-ui), Prisma 6 ORM + PostgreSQL 16 (local Docker, 127.0.0.1:5444). Local R2-compatible signed object storage, local SMTP outbox viewer (zero paid subscriptions). Backend is being migrated to Rust: Axum 0.7 + sqlx 0.8 + Postgres in `backend/`; Next.js route handlers remain until each Rust equivalent is implemented and tested, with `/api/*` proxied via `RUST_BACKEND_URL` when set. Dev server runs on 127.0.0.1:3219.
+delegated + Charter-specified: Next.js 16 (App Router, TypeScript, React 19) frontend, Tailwind CSS 4, shadcn/ui (base-ui), Prisma 6 ORM + PostgreSQL 19 (local Docker, 127.0.0.1:5444). Local R2-compatible signed object storage, local SMTP outbox viewer (zero paid subscriptions). Backend is being migrated to Rust: Axum 0.7 + sqlx 0.8 + Postgres in `backend/`; Next.js route handlers remain until each Rust equivalent is implemented and tested, with `/api/*` proxied via `RUST_BACKEND_URL` when set. Dev server runs on 127.0.0.1:3219.
 
 ## Users
 
@@ -39,7 +39,7 @@ Used on campus workstations, laptops, and mobile browsers (Chrome/Android web) i
   - All administrative tables enforce server-side pagination (`15 / 25 / 50`), search/filters, A–Z reference list sorting, and newest-first operational queue sorting.
   - Forms preserve in-progress entries in client storage (`localStorage`) and warn on unsaved navigation.
   - Authentication enforces `bcrypt` hashing, 5-attempt / 15-minute lockout with security alert email logging, and `<= 5MB` MIME-validated uploads.
-- **Prototype Local Simulation (inferred from "no subscription" constraint):** PostgreSQL 16 runs via local Docker (`127.0.0.1:5444`); Cloudflare R2 object storage is modeled via authenticated local filesystem object storage; transactional SMTP emails render into a local dev outbox table/page (`/dev/outbox`).
+- **Prototype Local Simulation (inferred from "no subscription" constraint):** PostgreSQL 19 runs via local Docker (`127.0.0.1:5444`); Cloudflare R2 object storage is modeled via authenticated local filesystem object storage; transactional SMTP emails render into a local dev outbox table/page (`/dev/outbox`).
 
 ## Brand Commitments
 

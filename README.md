@@ -18,7 +18,7 @@ TechTracker is a web application that monitors and documents a student's **100 h
                                             │ sqlx
                                             ▼
                                   ┌──────────────────────┐
-                                  │  PostgreSQL 15        │
+                                  │  PostgreSQL 19        │
                                   │  127.0.0.1:5444      │
                                   └──────────────────────┘
 ```
@@ -46,7 +46,7 @@ TechTracker is a web application that monitors and documents a student's **100 h
 |---|---|
 | Frontend | Next.js 16.4.6 (App Router), React 19, Tailwind CSS 4, Base UI (`@base-ui/react`), lucide-react, sonner |
 | API | Rust — Axum 0.7, sqlx 0.8, tokio, serde, jsonwebtoken, bcrypt, printpdf, calamine |
-| Database | PostgreSQL 15 |
+| Database | PostgreSQL 19 |
 | ORM / migrations | Prisma 6 (schema owner) |
 | Testing | Vitest (unit/integration), Playwright (E2E, incl. 430 px mobile), cargo test |
 | Tooling | TypeScript 5, ESLint 9, Prettier-equivalent via `cargo fmt` |
@@ -57,7 +57,7 @@ TechTracker is a web application that monitors and documents a student's **100 h
 
 - Node.js 20+ and npm
 - Rust toolchain (cargo 1.x) — `rustup`
-- PostgreSQL 15 running on `127.0.0.1:5444` (or set `DATABASE_URL`)
+- PostgreSQL 19 running on `127.0.0.1:5444` (or set `DATABASE_URL`)
 - (Optional) `psql`/`pg_isready` for manual DB inspection
 
 ---
