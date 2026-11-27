@@ -187,12 +187,12 @@ export default function RegisterPage() {
           <div className="space-y-2 text-center text-sm">
             <p className="text-muted-foreground">
               Already have an account?{" "}
-              <Link href="/login" className="font-medium text-primary hover:underline">
+              <Link href="/login" className="inline-flex min-h-11 items-center font-medium text-primary hover:underline">
                 Sign in
               </Link>
             </p>
             <p>
-              <Link href="/" className="text-xs text-muted-foreground hover:text-foreground hover:underline">
+              <Link href="/" className="inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground hover:underline">
                 Back to homepage
               </Link>
             </p>

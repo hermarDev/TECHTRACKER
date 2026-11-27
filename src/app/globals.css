@@ -198,3 +198,9 @@
 
 /* Floating fields inherit the surface on which their labels sit. */
 [data-slot="dialog-content"] { --field-surface: var(--popover); }
+
+/* Toasts must stay inside narrow phone viewports. */
+[data-sonner-toaster] {
+  width: calc(100vw - 2rem) !important;
+  max-width: calc(100vw - 2rem) !important;
+}

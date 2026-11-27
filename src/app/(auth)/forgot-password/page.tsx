@@ -116,13 +116,13 @@ export default function ForgotPasswordPage() {
 
           <div className="space-y-2 text-center text-sm">
             <p>
-              <Link href="/login" className="inline-flex items-center gap-1 font-medium text-primary underline-offset-4 hover:underline">
+              <Link href="/login" className="inline-flex min-h-11 items-center gap-1 font-medium text-primary underline-offset-4 hover:underline">
                 <KeyRound className="size-3.5" aria-hidden="true" />
                 Back to sign in
               </Link>
             </p>
             <p>
-              <Link href="/" className="text-xs text-muted-foreground hover:text-foreground hover:underline">
+              <Link href="/" className="inline-flex min-h-11 items-center text-xs text-muted-foreground hover:text-foreground hover:underline">
                 Back to homepage
               </Link>
             </p>

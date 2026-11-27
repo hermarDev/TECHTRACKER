@@ -26,7 +26,7 @@ export function PublicHeader({
   return (
     <header className="border-b border-border bg-card/90 backdrop-blur-xs">
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-3 px-4 lg:px-8">
-        <Link href="/" className="flex min-w-0 items-center gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-lg">
+        <Link href="/" className="flex min-h-11 min-w-0 items-center gap-3 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <BrandLogo />
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold tracking-tight text-foreground">TechTracker</p>

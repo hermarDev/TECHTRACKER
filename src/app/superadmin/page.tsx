@@ -1365,11 +1365,11 @@ function RoomsPanel() {
         </Alert>
       )}
 
-      <div className="grid gap-3">
+      <div className="grid grid-cols-1 min-w-0 gap-3">
         {rooms.map((room) => {
           const counts = conditionCounts(room);
           return (
-            <article key={room.id} className="rounded-xl border border-border bg-card p-4 shadow-xs">
+            <article key={room.id} className="min-w-0 rounded-xl border border-border bg-card p-4 shadow-xs">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="font-semibold">{room.name}</p>

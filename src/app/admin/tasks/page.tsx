@@ -189,7 +189,7 @@ export default function AdminTasksPage() {
               <Plus className="size-4 mr-2" />
               Assign New Task
             </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[90dvh]">
+            <DialogContent className="sm:max-w-2xl max-h-[90dvh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Assign New Task</DialogTitle>
                 <DialogDescription>Create a new task and assign it to students</DialogDescription>

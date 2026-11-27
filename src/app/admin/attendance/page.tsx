@@ -369,7 +369,7 @@ export default function AdminAttendancePage() {
 
           {/* Review evidence: photos + remarks */}
           <Dialog open={reviewItemId !== null} onOpenChange={(open) => !open && setReviewItemId(null)}>
-            <DialogContent className="max-w-2xl max-h-[90dvh] overflow-y-auto">
+            <DialogContent className="sm:max-w-2xl max-h-[90dvh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Attendance evidence</DialogTitle>
                 <DialogDescription>
@@ -458,7 +458,7 @@ export default function AdminAttendancePage() {
           </Dialog>
 
           <Dialog open={correctDialogOpen !== null} onOpenChange={(open) => !open && setCorrectDialogOpen(null)}>
-            <DialogContent className="max-w-md">
+            <DialogContent className="sm:max-w-md">
               <DialogHeader>
                 <DialogTitle>Correct Attendance Time</DialogTitle>
                 <DialogDescription>Provide corrected time-in/out and mandatory reason</DialogDescription>
@@ -524,7 +524,7 @@ export default function AdminAttendancePage() {
           </Dialog>
 
           <Dialog open={escalateDialogOpen !== null} onOpenChange={(open) => !open && setEscalateDialogOpen(null)}>
-            <DialogContent className="max-w-md">
+            <DialogContent className="sm:max-w-md">
               <DialogHeader>
                 <DialogTitle>Escalate to SuperAdmin</DialogTitle>
                 <DialogDescription>Provide summary and policy details for escalation</DialogDescription>

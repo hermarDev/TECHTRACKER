@@ -217,9 +217,9 @@ export default function StudentDashboardPage() {
       title="Your Pre-OJT progress"
       subtitle={`Track attendance, technical tasks and accreditation${user.section ? ` — ${user.section}` : ""}`}
     >
-      <div className="grid gap-6">
+      <div className="grid grid-cols-1 min-w-0 gap-6">
         {/* 100-Hour Ledger: credited vs pending kept separate */}
-        <section aria-label="100-hour ledger" className="grid gap-5 rounded-xl border border-border bg-card p-5 shadow-xs lg:p-6">
+        <section aria-label="100-hour ledger" className="grid grid-cols-1 min-w-0 gap-5 rounded-xl border border-border bg-card p-5 shadow-xs lg:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <GraduationCap className="size-4 text-primary" aria-hidden="true" />
@@ -311,9 +311,9 @@ export default function StudentDashboardPage() {
           )}
         </section>
 
-        <section aria-label="Overview actions" className="grid gap-5 lg:grid-cols-2">
+        <section aria-label="Overview actions" className="grid grid-cols-1 min-w-0 gap-5 lg:grid-cols-2">
           {/* Active tasks summary */}
-          <div className="grid gap-3 rounded-xl border border-border bg-card p-5 shadow-xs">
+          <div className="grid grid-cols-1 min-w-0 gap-3 rounded-xl border border-border bg-card p-5 shadow-xs">
             <div className="flex items-center justify-between gap-2">
               <h2 className="flex items-center gap-2 text-base font-semibold">
                 <ClipboardCheck className="size-4 text-primary" aria-hidden="true" />
@@ -346,7 +346,7 @@ export default function StudentDashboardPage() {
           </div>
 
           {/* Recent attendance */}
-          <div className="grid gap-3 rounded-xl border border-border bg-card p-5 shadow-xs">
+          <div className="grid grid-cols-1 min-w-0 gap-3 rounded-xl border border-border bg-card p-5 shadow-xs">
             <div className="flex items-center justify-between gap-2">
               <h2 className="flex items-center gap-2 text-base font-semibold">
                 <CalendarClock className="size-4 text-primary" aria-hidden="true" />
@@ -385,7 +385,7 @@ export default function StudentDashboardPage() {
 
         {/* Quick links */}
         <section aria-label="Quick links">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {QUICK_LINKS.map((item) => {
               const Icon = item.icon;
               return (

@@ -111,7 +111,7 @@ export default function LoginPage() {
                   <FloatingInput id="email" name="email" type="email" autoComplete="email" required label="Email address" error={emailError} value={email} onChange={(e) => { setEmail(e.target.value); setEmailError(null); }} />
                   <PasswordInput id="password" name="password" autoComplete="current-password" required label="Password" value={password} onChange={(e) => setPassword(e.target.value)} aria-invalid={mode === "error"} />
                   <div className="flex justify-end">
-                    <Link href="/forgot-password" className="text-sm font-medium text-primary hover:underline">
+                    <Link href="/forgot-password" className="inline-flex min-h-11 items-center text-sm font-medium text-primary hover:underline">
                       Forgot password?
                     </Link>
                   </div>
@@ -125,7 +125,7 @@ export default function LoginPage() {
 
           <div className="text-center text-sm">
             <span className="text-muted-foreground">New to TechTracker? </span>
-            <Link href="/register" className="font-medium text-primary hover:underline">
+            <Link href="/register" className="inline-flex min-h-11 items-center font-medium text-primary hover:underline">
               Create student account
             </Link>
           </div>
@@ -135,7 +135,7 @@ export default function LoginPage() {
               <ShieldCheck className="size-4" aria-hidden="true" />
               Accounts lock for 15 minutes after 5 failed sign-in attempts.
             </p>
-            <Link href="/" className="hover:text-foreground hover:underline">
+            <Link href="/" className="inline-flex min-h-11 items-center hover:text-foreground hover:underline">
               Back to homepage
             </Link>
           </div>
