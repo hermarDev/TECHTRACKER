@@ -2,11 +2,13 @@ use serde::Deserialize;
 use validator::Validate;
 
 #[derive(Debug, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
 pub struct RegisterInput {
     #[validate(email)]
     pub email: String,
     #[validate(length(min = 8))]
     pub password: String,
+    pub confirm_password: Option<String>,
     #[validate(length(min = 1))]
     pub full_name: String,
     #[validate(length(min = 1))]

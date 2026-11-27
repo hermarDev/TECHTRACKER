@@ -76,7 +76,7 @@ test("older conversations load on demand", async ({ page }) => {
   await page.route("**/api/messages?*", (route) => {
     const url = new URL(route.request().url());
     const wanted = url.searchParams.get("page") === "2" ? secondPage : firstPage;
-    return route.fulfill({ json: { conversations: wanted, page: Number(url.searchParams.get("page") ?? 1), pageSize: 5 } });
+    return route.fulfill({ json: { conversations: wanted, page: Number(url.searchParams.get("page") ?? 1), pageSize: 5, total: 10 } });
   });
 
   await login(page, STUDENT_EMAIL, "/student");
@@ -89,7 +89,8 @@ test("older conversations load on demand", async ({ page }) => {
   await loadOlder.click();
 
   await expect(conversationList.getByText("Older thread 0", { exact: true })).toBeVisible();
-  await expect(conversationList.getByText("Thread 0", { exact: true })).toBeHidden();
+  await expect(conversationList.getByText("Thread 0", { exact: true })).toBeVisible();
+  await expect(loadOlder).toBeHidden();
 });
 
 test("task status filter returns only matching assignments", async ({ page }) => {

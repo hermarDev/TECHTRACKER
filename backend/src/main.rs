@@ -55,6 +55,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .merge(routes::router())
+        .layer(axum::extract::DefaultBodyLimit::max(12 * 1024 * 1024))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

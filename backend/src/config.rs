@@ -10,7 +10,6 @@ pub struct Config {
     pub jwt_secret: String,
     pub app_url: String,
     pub env: String,
-    pub enable_dev_outbox: bool,
 }
 
 impl Config {
@@ -57,16 +56,11 @@ impl Config {
             })
             .unwrap_or_else(|| DEFAULT_APP_URL.to_string());
 
-        let enable_dev_outbox = env::var("ENABLE_DEV_OUTBOX")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
-
         Ok(Self {
             database_url,
             jwt_secret,
             app_url,
             env,
-            enable_dev_outbox,
         })
     }
 

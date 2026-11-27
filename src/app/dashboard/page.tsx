@@ -1,5 +1,5 @@
-import { getSessionFromCookies } from "@/lib/auth";
-import { roleDashboardPath } from "@/lib/rbac";
+import { getBackendSession } from "@/lib/backend-session";
+import { roleDashboardPath } from "@/lib/rbac-policies";
 import { redirect } from "next/navigation";
 
 /**
@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
  * visitor to their dedicated dashboard (/student, /admin, /superadmin).
  */
 export default async function DashboardPage() {
-  const session = await getSessionFromCookies();
+  const session = await getBackendSession();
   if (!session) {
     redirect("/login");
     return null;

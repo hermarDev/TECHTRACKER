@@ -17,7 +17,7 @@ import {
   ShieldOff,
   UserRound,
 } from "lucide-react";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/types";
 
 import { AppShell } from "@/components/shell/AppShell";
 import { useDraftForm } from "@/hooks/useDraftForm";
@@ -95,8 +95,8 @@ export default function MessagesPage() {
   const [me, setMe] = React.useState<Me | null>(null);
   const [unread, setUnread] = React.useState(0);
   const [conversations, setConversations] = React.useState<Conversation[]>([]);
+  const [conversationTotal, setConversationTotal] = React.useState(0);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
-  const [selectedPage, setSelectedPage] = React.useState(1);
   const [conversationPage, setConversationPage] = React.useState(1);
   const threadRef = React.useRef<HTMLElement>(null);
   const messagesEndRef = React.useRef<HTMLElement>(null);
@@ -148,8 +148,18 @@ export default function MessagesPage() {
         setError(body.error ?? "Conversations could not be loaded.");
         return;
       }
-      const body = (await res.json()) as { conversations: Conversation[] };
-      setConversations(body.conversations);
+      const body = (await res.json()) as {
+        conversations: Conversation[];
+        total?: number;
+      };
+      setConversationTotal(body.total ?? body.conversations.length);
+      setConversations((current) =>
+        conversationPage > 1
+          ? [...current, ...body.conversations.filter(
+              (item) => !current.some((existing) => existing.id === item.id)
+            )]
+          : body.conversations
+      );
       setSelectedId((current) => current ?? body.conversations[0]?.id ?? null);
     } catch {
       setError("TechTracker could not reach the server. Check your connection and retry.");
@@ -330,7 +340,7 @@ export default function MessagesPage() {
   if (me.role === "SUPERADMIN") {
     return (
       <AppShell user={me} unreadNotifications={unread} title="Messages">
-        <div className="mx-auto grid max-w-xl gap-4 rounded-sm border border-border bg-card p-6 text-center">
+        <div className="mx-auto grid max-w-xl gap-4 rounded-xl border border-border bg-card p-6 text-center shadow-xs">
           <ShieldOff className="mx-auto size-10 text-muted-foreground" aria-hidden="true" />
           <h2 className="text-lg font-semibold">Alerts Only — No Chat Access</h2>
           <p className="text-sm text-muted-foreground">
@@ -381,7 +391,7 @@ export default function MessagesPage() {
     >
       <div className="grid gap-4 lg:grid-cols-[minmax(280px,2fr)_minmax(0,3fr)]">
         {/* Conversation list */}
-        <section aria-label="Conversations" className="min-w-0 w-full rounded-sm border border-border bg-card">
+        <section aria-label="Conversations" className="min-w-0 w-full rounded-xl border border-border bg-card shadow-xs">
           <div className="border-b border-border px-4 py-3">
             <h2 className="text-sm font-semibold">Conversations</h2>
             <p className="text-xs text-muted-foreground tabular-ledger">
@@ -433,7 +443,7 @@ export default function MessagesPage() {
                   </button>
                 </li>
               ))}
-              {conversations.length >= 5 && (
+              {conversations.length > 0 && conversations.length < conversationTotal && (
                 <li key="load-older">
                   <button
                     type="button"
@@ -448,7 +458,7 @@ export default function MessagesPage() {
         </section>
 
         {/* Thread */}
-        <section ref={threadRef} aria-label="Message thread" className="flex min-h-[28rem] min-w-0 w-full flex-col rounded-sm border border-border bg-card">
+        <section ref={threadRef} aria-label="Message thread" className="flex min-h-[28rem] min-w-0 w-full flex-col rounded-xl border border-border bg-card shadow-xs">
           {!selected ? (
             <div className="flex flex-1 items-center justify-center p-6">
               <p className="text-sm text-muted-foreground">Select a conversation to read the thread.</p>
@@ -473,7 +483,7 @@ export default function MessagesPage() {
                   return (
                     <li key={message.id} className={own ? "flex justify-end" : "flex justify-start"}>
                       <div
-                        className={`max-w-[85%] rounded-sm border p-3 ${
+                        className={`max-w-[85%] rounded-xl border p-3.5 ${
                           own ? "border-primary/25 bg-primary/10" : "border-border bg-muted/40"
                         }`}
                       >
@@ -526,7 +536,7 @@ export default function MessagesPage() {
               </ol>
 
               <div className="border-t border-border p-4">
-                <div className="flex items-end gap-2 rounded-sm border border-input bg-background p-2">
+                <div className="flex items-end gap-2 rounded-lg border border-input bg-background p-2">
                   <label className="inline-flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
                     <Paperclip className="size-4" />
                     <span className="sr-only">Attach file (≤ 5 MB)</span>
@@ -563,7 +573,7 @@ export default function MessagesPage() {
                     onClick={() => void sendToExisting()}
                     disabled={sending}
                     aria-label="Send message"
-                    className="size-10 shrink-0 rounded-sm"
+                    className="size-10 shrink-0 rounded-lg"
                   >
                     <Send className="size-4" />
                   </Button>
@@ -605,6 +615,10 @@ export default function MessagesPage() {
               <div className="grid gap-1.5">
                 <Label htmlFor="picker-mode">Recipients</Label>
                 <Select
+                  items={[
+                    { value: "BATCH", label: "Batch announcement" },
+                    { value: "DIRECT", label: "Individual students" },
+                  ]}
                   value={pickerMode}
                   onValueChange={(value) => setPickerMode(value === "BATCH" ? "BATCH" : "DIRECT")}
                 >
@@ -622,6 +636,13 @@ export default function MessagesPage() {
                 <div className="grid gap-1.5">
                   <Label htmlFor="picker-batch">Duty batch</Label>
                   <Select
+                    items={[
+                      { value: "NONE", label: "Select a batch" },
+                      ...pickerBatches.map((batch) => ({
+                        value: batch.id,
+                        label: `${batch.name} (${batch.section})`,
+                      })),
+                    ]}
                     value={pickerBatchId || "NONE"}
                     onValueChange={(value) => {
                       setPickerBatchId(value === "NONE" ? "" : (value ?? ""));

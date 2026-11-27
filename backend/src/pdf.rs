@@ -29,6 +29,41 @@ pub struct InspectionSummaryRow {
     pub inspector: String,
 }
 
+fn total_credited_hours(logs: &[AccreditationLog]) -> f64 {
+    logs.iter().map(|l| l.credited_hours).sum()
+}
+
+fn truncate_chars(value: &str, max: usize) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() > max {
+        format!("{}...", chars[..max].iter().collect::<String>())
+    } else {
+        value.to_string()
+    }
+}
+
+fn push_accreditation_table_header(ops: &mut Vec<Op>, header_y: f32) {
+    let cols = [14.0f32, 40.0, 66.0, 92.0, 118.0];
+    let headers = ["Date", "Time-In", "Time-Out", "Credited", "Status"];
+    ops.push(Op::SaveGraphicsState);
+    ops.push(Op::StartTextSection);
+    for (i, h) in headers.iter().enumerate() {
+        ops.push(Op::SetTextCursor {
+            pos: Point::new(Mm(cols[i]), Mm(header_y)),
+        });
+        ops.push(Op::SetFont {
+            font: PdfFontHandle::Builtin(BuiltinFont::HelveticaBold),
+            size: Pt(8.0),
+        });
+        ops.push(Op::SetLineHeight { lh: Pt(8.0) });
+        ops.push(Op::ShowText {
+            items: vec![TextItem::Text(h.to_string())],
+        });
+    }
+    ops.push(Op::EndTextSection);
+    ops.push(Op::RestoreGraphicsState);
+}
+
 #[allow(clippy::vec_init_then_push)]
 pub fn generate_accreditation_pdf(
     student: &AccreditationStudent,
@@ -112,30 +147,13 @@ pub fn generate_accreditation_pdf(
     ops.push(Op::RestoreGraphicsState);
 
     // Table header
-    let header_y = 242.0f32;
     let cols = [14.0f32, 40.0, 66.0, 92.0, 118.0];
-    let headers = ["Date", "Time-In", "Time-Out", "Credited", "Status"];
-    ops.push(Op::SaveGraphicsState);
-    ops.push(Op::StartTextSection);
-    for (i, h) in headers.iter().enumerate() {
-        ops.push(Op::SetTextCursor {
-            pos: Point::new(Mm(cols[i]), Mm(header_y)),
-        });
-        ops.push(Op::SetFont {
-            font: PdfFontHandle::Builtin(BuiltinFont::HelveticaBold),
-            size: Pt(8.0),
-        });
-        ops.push(Op::SetLineHeight { lh: Pt(8.0) });
-        ops.push(Op::ShowText {
-            items: vec![TextItem::Text(h.to_string())],
-        });
-    }
-    ops.push(Op::EndTextSection);
-    ops.push(Op::RestoreGraphicsState);
+    push_accreditation_table_header(&mut ops, 242.0);
 
-    // Table rows
-    let mut y = header_y - 6.0;
-    let mut total = 0.0f64;
+    // Table rows, spilling onto new pages instead of truncating the log.
+    let mut pages: Vec<PdfPage> = Vec::new();
+    let mut y = 236.0f32;
+    let total = total_credited_hours(logs);
     for log in logs {
         let row = [
             log.shift_date.clone(),
@@ -165,10 +183,12 @@ pub fn generate_accreditation_pdf(
         }
         ops.push(Op::EndTextSection);
         ops.push(Op::RestoreGraphicsState);
-        total += log.credited_hours;
         y -= 5.0;
-        if y < 20.0 {
-            break;
+        if y < 24.0 {
+            pages.push(PdfPage::new(Mm(210.0), Mm(297.0), ops));
+            ops = Vec::new();
+            push_accreditation_table_header(&mut ops, 268.0);
+            y = 262.0;
         }
     }
 
@@ -193,9 +213,9 @@ pub fn generate_accreditation_pdf(
     ops.push(Op::EndTextSection);
     ops.push(Op::RestoreGraphicsState);
 
-    let page = PdfPage::new(Mm(210.0), Mm(297.0), ops);
+    pages.push(PdfPage::new(Mm(210.0), Mm(297.0), ops));
     let mut doc = PdfDocument::new("Accreditation");
-    doc.pages.push(page);
+    doc.pages.extend(pages);
     let mut warnings = Vec::new();
     doc.save(&PdfSaveOptions::default(), &mut warnings)
 }
@@ -331,18 +351,10 @@ pub fn generate_inspection_pdf(rows: &[InspectionSummaryRow]) -> Vec<u8> {
             row.room.clone(),
             row.unit_code.clone(),
             row.condition.clone(),
-            if row.remarks.len() > 20 {
-                format!("{}...", &row.remarks[..20])
-            } else {
-                row.remarks.clone()
-            },
+            truncate_chars(&row.remarks, 20),
             row.photo_key.clone().unwrap_or_else(|| "—".to_string()),
             row.inspected_at.clone(),
-            if row.inspector.len() > 14 {
-                format!("{}...", &row.inspector[..14])
-            } else {
-                row.inspector.clone()
-            },
+            truncate_chars(&row.inspector, 14),
         ];
         ops.push(Op::SaveGraphicsState);
         ops.push(Op::StartTextSection);
@@ -372,4 +384,54 @@ pub fn generate_inspection_pdf(rows: &[InspectionSummaryRow]) -> Vec<u8> {
     doc.pages.push(page);
     let mut warnings = Vec::new();
     doc.save(&PdfSaveOptions::default(), &mut warnings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accreditation_pdf_spills_to_multiple_pages_and_sums_every_row() {
+        let student = AccreditationStudent {
+            full_name: "Test Student".into(),
+            student_id_no: Some("2026-00001".into()),
+            program: Some("BSIT".into()),
+            section: Some("4A".into()),
+            required_hours: 100.0,
+        };
+        let logs: Vec<AccreditationLog> = (0..60)
+            .map(|i| AccreditationLog {
+                shift_date: format!("2026-11-{:02}", i % 28 + 1),
+                time_in: "08:00".into(),
+                time_out: Some("17:00".into()),
+                credited_hours: 1.0,
+                is_irregular: false,
+            })
+            .collect();
+        let pdf = generate_accreditation_pdf(&student, &logs);
+        let text = String::from_utf8_lossy(&pdf);
+        assert!(
+            text.matches("/Type/Page").count() >= 2,
+            "expected multiple pages"
+        );
+        assert_eq!(total_credited_hours(&logs), 60.0);
+    }
+
+    #[test]
+    fn inspection_pdf_truncates_multibyte_text_without_panicking() {
+        let remark = "Maayos — ✅".repeat(10);
+        let rows = vec![InspectionSummaryRow {
+            room: "Lab 1".into(),
+            unit_code: "PC-1".into(),
+            condition: "FUNCTIONING".into(),
+            remarks: remark.clone(),
+            photo_key: None,
+            inspected_at: "2026-11-27 08:00".into(),
+            inspector: "Engr. — ✅Reviewer".into(),
+        }];
+        let pdf = generate_inspection_pdf(&rows);
+        assert!(!pdf.is_empty());
+        assert_ne!(truncate_chars(&remark, 20), remark);
+        assert!(truncate_chars("Maayos — ✅", 20).chars().count() <= 20);
+    }
 }

@@ -30,7 +30,7 @@ export function DataTablePagination({
         </span>
         <div className="inline-flex items-center gap-1.5">
           <span>Rows:</span>
-          <select aria-label="Rows per page" value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))} className="min-h-11 rounded-sm border border-input bg-background px-2 text-foreground sm:min-h-8">
+          <select aria-label="Rows per page" value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))} className="min-h-11 rounded-lg border border-input/70 bg-background px-2 text-foreground sm:min-h-8">
             <option value={15}>15</option><option value={25}>25</option><option value={50}>50</option>
           </select>
         </div>

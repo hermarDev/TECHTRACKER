@@ -77,6 +77,43 @@ test("registration restores non-secret details without storing passwords", async
   await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
 });
 
+test("task assignment submits a datetime-local deadline as an ISO timestamp", async ({ page }) => {
+  await login(page, "coordinator@aclc-mandaue.edu.ph", "/admin");
+  await page.goto("/admin/tasks");
+  await page.getByRole("button", { name: "Assign New Task" }).click();
+  const dialog = page.getByRole("dialog", { name: "Assign New Task" });
+  await expect(dialog.getByRole("checkbox").first()).toBeVisible();
+  await dialog.getByLabel("Title", { exact: true }).fill(`Deadline regression ${Date.now()}`);
+  await dialog.getByLabel("Instructions", { exact: false }).fill("Verify datetime-local conversion");
+  await dialog.locator("#deadline").fill("2026-12-31T13:30");
+  await dialog.getByRole("checkbox").first().check();
+  await dialog.getByRole("button", { name: "Assign Task" }).click();
+  await expect(page.getByText("Task assigned successfully")).toBeVisible();
+});
+
+test("attendance correction sends the picked local time as an ISO timestamp", async ({ page }) => {
+  await login(page, "coordinator@aclc-mandaue.edu.ph", "/admin");
+  const item = { id: "audit-correct", status: "PENDING", isIrregular: false, recordedHours: 1,
+    student: { id: "audit", fullName: "Audit Student", studentIdNo: "AUDIT" },
+    photoInKey: "audit.png", shiftDate: "2026-01-01T00:00:00Z", timeIn: "2026-01-01T05:30:00Z", timeOut: null };
+  let submitted: { timeIn?: string; timeOut?: string | null } = {};
+  await page.route("**/api/attendance?*", (route) => route.fulfill({ json: { items: [item], total: 1 } }));
+  await page.route("**/api/attendance/audit-correct/correct", async (route) => {
+    submitted = route.request().postDataJSON();
+    await route.fulfill({ json: { ok: true } });
+  });
+  await page.goto("/admin/attendance");
+  await page.getByRole("row", { name: /Audit Student/ }).getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Correct time" }).click();
+  const dialog = page.getByRole("dialog", { name: "Correct Attendance Time" });
+  await dialog.locator("#correctTimeIn").fill("2026-01-01T13:30");
+  await dialog.getByLabel("Correction Reason").fill("Correcting the recorded shift start.");
+  await dialog.getByRole("button", { name: "Save Correction" }).click();
+  await expect(page.getByText("Attendance time corrected")).toBeVisible();
+  expect(submitted.timeIn).toBe(new Date("2026-01-01T13:30").toISOString());
+  expect(submitted.timeOut).toBeNull();
+});
+
 test("attendance rejection requires a visible remark before submitting", async ({ page }) => {
   await login(page, "coordinator@aclc-mandaue.edu.ph", "/admin");
   const item = { id: "audit-review", status: "PENDING", isIrregular: false, recordedHours: 1,

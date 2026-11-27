@@ -5,6 +5,7 @@ import Link from "next/link";
 import { StatusBadge } from "@/components/shell/StatusBadge";
 import { AppShell } from "@/components/shell/AppShell";
 import { DataTablePagination } from "@/components/shell/DataTablePagination";
+import { formatSafeDate } from "@/lib/task-format";
 import { toast } from "sonner";
 import { DataTableToolbar } from "@/components/shell/DataTableToolbar";
 import { Calendar, Loader2 } from "lucide-react";
@@ -72,7 +73,7 @@ export default function TasksPage() {
 
   return (
     <AppShell user={user} title="Technical Tasks" subtitle="Start, document, and resubmit assigned work.">
-      <section className="rounded-sm border border-border bg-card p-4 lg:p-5">
+      <section className="rounded-xl border border-border bg-card p-5 shadow-xs lg:p-6">
         <CardHeader className="pb-4">
           <CardTitle>My Tasks</CardTitle>
         </CardHeader>
@@ -83,6 +84,10 @@ export default function TasksPage() {
             searchPlaceholder="Search tasks..."
             filters={
               <Select
+                items={statusOptions.map((status) => ({
+                  value: status,
+                  label: status === "ALL" ? "All Statuses" : status.replace("_", " "),
+                }))}
                 value={statusFilter || "ALL"}
                 onValueChange={(value) => { setPage(1); setStatusFilter(value === "ALL" ? "" : (value ?? "")); }}
               >
@@ -137,7 +142,7 @@ export default function TasksPage() {
                           </TableCell>
                           <TableCell className="text-muted-foreground">{task.category}</TableCell>
                           <TableCell className="tabular-ledger">
-                            {new Date(task.deadline).toLocaleDateString()}
+                            {formatSafeDate(task.deadline)}
                           </TableCell>
                           <TableCell>
                             <StatusBadge status={status} />

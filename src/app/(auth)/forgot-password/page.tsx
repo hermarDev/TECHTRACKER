@@ -1,12 +1,12 @@
 "use client";
 
-import { BrandLogo } from "@/components/shell/BrandLogo";
+import { PublicHeader } from "@/components/shell/PublicHeader";
 import * as React from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { CheckCircle2, CircleAlert, KeyRound, MailQuestion } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { FloatingInput } from "@/components/shell/FloatingInput";
 
 export default function ForgotPasswordPage() {
@@ -47,58 +47,50 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-1 items-center justify-center bg-muted/40 px-4 py-10">
-      <div className="w-full max-w-md space-y-6">
-        <div className="text-center">
-          <BrandLogo className="mx-auto size-12" />
-          <h1 className="mt-4 text-2xl font-semibold tracking-tight">Password Recovery</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Reset links are single-use and expire after 1 hour.
-          </p>
-        </div>
+    <div className="flex min-h-screen flex-1 flex-col bg-background">
+      <PublicHeader />
+      <main className="flex flex-1 flex-col items-center justify-center px-4 py-10">
+        <div className="w-full max-w-[480px] space-y-6">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+              Reset your password
+            </h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Enter the email associated with your account.
+            </p>
+          </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Forgot your password?</CardTitle>
-            <CardDescription>
-              Enter your registered email and we will send a reset link.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {sent ? (
-              <div
-                role="status"
-                className="flex items-start gap-2.5 rounded-sm border border-success-surface/40 bg-success-surface/10 px-3.5 py-3 text-sm text-success"
-              >
-                <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                <div className="space-y-1">
-                  <p className="font-medium">Request received.</p>
-                  <p>
-                    If an account exists for this email address, a password reset link has been
-                    sent. The link expires in 1 hour.
-                  </p>
-                  <p className="text-xs opacity-80">
-                    On this local prototype, read the link in the{" "}
-                    <Link href="/dev/outbox" className="underline underline-offset-4">
-                      dev email outbox
-                    </Link>
-                    .
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <>
-                {error && (
-                  <div
-                    role="alert"
-                    className="mb-4 flex items-start gap-2.5 rounded-sm border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
-                  >
-                    <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                    <span>{error}</span>
+          <Card className="rounded-xl border-border bg-card shadow-xs">
+            <CardContent className="p-6 sm:p-8">
+              {sent ? (
+                <div
+                  role="status"
+                  className="flex items-start gap-2.5 rounded-lg border border-success-surface/40 bg-success-surface/10 px-3.5 py-3 text-sm text-success"
+                >
+                  <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                  <div className="space-y-1">
+                    <p className="font-medium">Request received.</p>
+                    <p>
+                      If an account exists for this email address, a password reset link has been
+                      sent. The link expires in 1 hour.
+                    </p>
+                    <p className="text-xs opacity-80">
+                      Open the link from your inbox to choose a new password.
+                    </p>
                   </div>
-                )}
-                <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-                  <div className="space-y-2">
+                </div>
+              ) : (
+                <>
+                  {error && (
+                    <div
+                      role="alert"
+                      className="mb-4 flex items-start gap-2.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
+                    >
+                      <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                      <span>{error}</span>
+                    </div>
+                  )}
+                  <form onSubmit={handleSubmit} className="space-y-4" noValidate>
                     <FloatingInput
                       id="email"
                       type="email"
@@ -109,29 +101,34 @@ export default function ForgotPasswordPage() {
                       onChange={(e) => setEmail(e.target.value)}
                       aria-invalid={Boolean(error)}
                     />
-                  </div>
-                  <Button type="submit" className="h-11 w-full gap-2 text-base" disabled={submitting}>
-                    <MailQuestion className="size-4" aria-hidden="true" />
-                    <span>{submitting ? "Sending..." : "Send reset link"}</span>
-                  </Button>
-                </form>
-              </>
-            )}
-          </CardContent>
-        </Card>
+                    <Button type="submit" className="h-11 w-full gap-2 text-sm font-semibold" disabled={submitting}>
+                      <MailQuestion className="size-4" aria-hidden="true" />
+                      <span>{submitting ? "Sending..." : "Send reset link"}</span>
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      If an account exists, a single-use reset link expiring in 1 hour will be sent.
+                    </p>
+                  </form>
+                </>
+              )}
+            </CardContent>
+          </Card>
 
-        <p className="text-center text-sm text-muted-foreground">
-          Remembered it?{" "}
-          <Link href="/login" className="font-medium text-primary underline-offset-4 hover:underline">
-            Back to sign in
-          </Link>
-        </p>
-
-        <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground/80">
-          <KeyRound className="size-4" aria-hidden="true" />
-          For your security, the response is identical whether or not the account exists.
-        </p>
-      </div>
+          <div className="space-y-2 text-center text-sm">
+            <p>
+              <Link href="/login" className="inline-flex items-center gap-1 font-medium text-primary underline-offset-4 hover:underline">
+                <KeyRound className="size-3.5" aria-hidden="true" />
+                Back to sign in
+              </Link>
+            </p>
+            <p>
+              <Link href="/" className="text-xs text-muted-foreground hover:text-foreground hover:underline">
+                Back to homepage
+              </Link>
+            </p>
+          </div>
+        </div>
+      </main>
     </div>
   );
 }

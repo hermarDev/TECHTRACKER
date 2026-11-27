@@ -2,26 +2,27 @@
 name: TechTracker
 description: Institutional duty and laboratory monitoring interface
 colors:
-  primary: "oklch(0.46 0.19 260)"
-  primary-foreground: "oklch(0.99 0 0)"
-  background: "oklch(0.985 0.004 247)"
-  foreground: "oklch(0.175 0.025 256)"
-  card: "oklch(1 0 0)"
-  muted: "oklch(0.955 0.008 247)"
-  muted-foreground: "oklch(0.44 0.02 256)"
-  border: "oklch(0.89 0.012 250)"
-  sidebar: "oklch(0.195 0.03 258)"
-  destructive: "oklch(0.54 0.21 25)"
-  success: "oklch(50.8% 0.118 165.612)"
-  warning: "oklch(47.3% 0.137 46.201)"
+  primary: "#2563EB"
+  primary-foreground: "#FFFFFF"
+  background: "#FAFAFA"
+  foreground: "#182235"
+  card: "#FFFFFF"
+  muted: "#F4F6F9"
+  muted-foreground: "#526176"
+  border: "#DCE2EA"
+  sidebar: "#0F172A"
+  destructive: "#B91C1C"
+  success: "#166534"
+  warning: "#92400E"
 typography:
   body:
     fontFamily: "Plus Jakarta Sans, sans-serif"
   data:
     fontFamily: "JetBrains Mono, monospace"
 rounded:
-  sm: "4px"
-  md: "6.4px"
+  sm: "6px"
+  md: "8px"
+  lg: "12px"
   pill: "9999px"
 spacing:
   sm: "8px"
@@ -31,7 +32,7 @@ components:
   button-primary:
     backgroundColor: "{colors.primary}"
     textColor: "{colors.primary-foreground}"
-    rounded: "{rounded.sm}"
+    rounded: "{rounded.md}"
 ---
 
 # Design System: TechTracker
@@ -50,19 +51,19 @@ Plus Jakarta Sans is the interface face. Use JetBrains Mono and tabular numerals
 
 ## Layout
 
-Desktop uses a persistent sidebar and spacious content area; mobile uses a bottom navigation bar with overflow in a drawer. Tables scroll horizontally when needed. Forms and review actions remain usable on narrow screens, with mobile controls at least 44 pixels high.
+Public and auth pages share `PublicHeader` (`BrandLogo`, `ThemeToggle`, single sign-in CTA) and centered V3 containers. Authenticated desktop views use a persistent grouped sidebar (`Workspace`, `Management`, `Governance`, `Communication`, `Account`), a compact topbar displaying the `{role} / {page}` breadcrumb with notification, theme, and account actions, and page `<h1>` titles + subtitles rendered inside `<main>`; mobile uses a bottom navigation bar with overflow in a drawer. Tables scroll horizontally when needed. Forms and review actions remain usable on narrow screens, with mobile controls at least 44 pixels high (`h-10` on desktop filter inputs/selects).
 
 ## Elevation & Depth
 
-Use surface color and thin borders to separate regions. Shadows are restrained; do not introduce decorative blur or glass overlays.
+Use surface color, thin `#DCE2EA` / `#30343C` borders, and subtle `shadow-xs` to separate regions. Do not introduce decorative blur or glass overlays.
 
 ## Shapes
 
-Use the small radius from the shared token scale for cards, controls, and dialogs. Rounded status pills may distinguish compact states; avoid oversized rounded message containers.
+Use `12px` (`rounded-xl`) for cards, panels, dialogs, and popups; `8px` (`rounded-lg`) for buttons, inputs, triggers, and message containers; and `9999px` (`rounded-full`) for status pills and active indicators.
 
 ## Components
 
-Use the shared buttons, fields, dialogs, pagination, and `StatusBadge` components. Provide persistent labels, visible focus, descriptive errors, and loading and empty states. Destructive alerts use an assertive live region; static informational callouts use a polite status. Forms preserve drafts where appropriate and keep sensitive credentials out of local storage.
+Use the shared buttons, fields, dialogs, pagination, `PublicHeader`, `EvidencePreview`, and `StatusBadge` components. `EvidencePreview` handles loading, missing-file, PDF fallback, retry, and open-original states consistently across attendance and task reviews. Report filters invalidate stale snapshots and disable exports until regenerated. Provide persistent labels, visible focus, descriptive errors, and loading and empty states. Destructive alerts use an assertive live region; static informational callouts use a polite status. Forms preserve drafts where appropriate and keep sensitive credentials out of local storage.
 
 ## Do's and Don'ts
 

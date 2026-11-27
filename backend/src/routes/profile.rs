@@ -26,6 +26,8 @@ struct ChangePasswordInput {
     current_password: String,
     #[serde(rename = "newPassword")]
     new_password: String,
+    #[serde(rename = "confirmPassword")]
+    confirm_password: String,
 }
 
 pub fn router() -> Router<AppState> {
@@ -169,13 +171,19 @@ async fn change_password(
     let input: ChangePasswordInput = serde_json::from_value(body)
         .map_err(|_| AppError::BadRequest("Invalid password change details".into()))?;
     if input.current_password.is_empty() {
-        return Err(AppError::BadRequest(
-            "Invalid password change details".into(),
-        ));
+        return Err(AppError::BadRequest("Current password is required".into()));
     }
     if input.new_password.len() < 8 || input.new_password.len() > 128 {
         return Err(AppError::BadRequest(
-            "Password must be at least 8 characters".into(),
+            "New password must be at least 8 characters".into(),
+        ));
+    }
+    if input.new_password != input.confirm_password {
+        return Err(AppError::BadRequest("New passwords do not match".into()));
+    }
+    if input.new_password == input.current_password {
+        return Err(AppError::BadRequest(
+            "New password must differ from current password".into(),
         ));
     }
 
@@ -191,7 +199,7 @@ async fn change_password(
         ));
     }
     let new_hash = hash_password(&input.new_password)?;
-    sqlx::query("UPDATE \"User\" SET \"passwordHash\"=$1, \"updatedAt\"=NOW() WHERE id=$2")
+    sqlx::query("UPDATE \"User\" SET \"passwordHash\"=$1, \"tokenVersion\"=\"tokenVersion\"+1, \"updatedAt\"=NOW() WHERE id=$2")
         .bind(&new_hash)
         .bind(&auth.0.sub)
         .execute(&state.db)

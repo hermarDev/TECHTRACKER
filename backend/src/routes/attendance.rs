@@ -1,16 +1,17 @@
 use crate::error::{AppError, Result};
 use crate::middleware::AuthUser;
 use crate::state::AppState;
+use crate::storage::{read_field_capped, sniff_mime, MAX_UPLOAD_BYTES};
 use axum::body::Body;
 use axum::extract::{Multipart, Path, Query, State};
 use axum::http::{header, StatusCode};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use chrono::{NaiveDate, Timelike, Utc};
+use chrono::{FixedOffset, NaiveDate, Timelike, Utc};
 use serde::Deserialize;
 use serde_json::json;
-use sqlx::Row;
+use sqlx::{QueryBuilder, Row};
 use uuid::Uuid;
 
 #[derive(Deserialize, Default)]
@@ -38,6 +39,30 @@ pub fn router() -> Router<AppState> {
         .route("/api/attendance/accreditation-pdf", get(accreditation_pdf))
 }
 
+/// Philippines has no DST; a fixed UTC+8 offset is sufficient for local punch times.
+fn manila_tz() -> FixedOffset {
+    FixedOffset::east_opt(8 * 3600).expect("UTC+8 is a valid fixed offset")
+}
+
+/// Pre-OJT completion is derived live: approved credited hours and no unaccepted tasks.
+pub(crate) async fn is_pre_ojt_completed(
+    db: &sqlx::PgPool,
+    student_id: &str,
+    required_hours: f64,
+) -> Result<bool> {
+    let row = sqlx::query(
+        "SELECT COALESCE(SUM(\"creditedHours\") FILTER (WHERE status::text='APPROVED'),0) AS hours, \
+         EXISTS (SELECT 1 FROM \"TaskAssignment\" WHERE \"studentId\"=$1 AND status::text<>'ACCEPTED') AS pending \
+         FROM \"AttendanceLog\" WHERE \"studentId\"=$1",
+    )
+    .bind(student_id)
+    .fetch_one(db)
+    .await?;
+    let hours: f64 = row.try_get("hours")?;
+    let pending: bool = row.try_get("pending")?;
+    Ok(hours >= required_hours && !pending)
+}
+
 fn normalize_pagination(page: Option<i64>, page_size: Option<i64>) -> (i64, i64, i64) {
     let page = page.unwrap_or(1).max(1);
     let mut ps = page_size.unwrap_or(15);
@@ -46,6 +71,38 @@ fn normalize_pagination(page: Option<i64>, page_size: Option<i64>) -> (i64, i64,
     }
     let skip = (page - 1) * ps;
     (page, ps, skip)
+}
+
+async fn attendance_row(state: &AppState, id: &str) -> Result<sqlx::postgres::PgRow> {
+    Ok(sqlx::query("SELECT id,\"studentId\",\"batchId\",\"scheduleId\",\"shiftDate\"::timestamptz,\"timeIn\"::timestamptz,\"timeOut\"::timestamptz,\"photoInKey\",\"photoOutKey\",\"isIrregular\",\"irregularReason\",status::text,\"recordedHours\",\"creditedHours\",\"reviewerId\",\"reviewerRemarks\",\"reviewedAt\"::timestamptz,\"correctedById\",\"correctionReason\",\"correctedAt\"::timestamptz,\"createdAt\"::timestamptz,\"updatedAt\"::timestamptz FROM \"AttendanceLog\" WHERE id=$1")
+        .bind(id).fetch_one(&state.db).await?)
+}
+
+fn attendance_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    json!({
+        "id": row.try_get::<String,_>("id").unwrap_or_default(),
+        "studentId": row.try_get::<String,_>("studentId").unwrap_or_default(),
+        "batchId": row.try_get::<String,_>("batchId").unwrap_or_default(),
+        "scheduleId": row.try_get::<Option<String>,_>("scheduleId").unwrap_or(None),
+        "shiftDate": row.try_get::<chrono::DateTime<Utc>,_>("shiftDate").map(|d| d.to_rfc3339()).unwrap_or_default(),
+        "timeIn": row.try_get::<chrono::DateTime<Utc>,_>("timeIn").map(|d| d.to_rfc3339()).unwrap_or_default(),
+        "timeOut": row.try_get::<Option<chrono::DateTime<Utc>>,_>("timeOut").ok().flatten().map(|d| d.to_rfc3339()),
+        "photoInKey": row.try_get::<String,_>("photoInKey").unwrap_or_default(),
+        "photoOutKey": row.try_get::<Option<String>,_>("photoOutKey").unwrap_or(None),
+        "isIrregular": row.try_get::<bool,_>("isIrregular").unwrap_or(false),
+        "irregularReason": row.try_get::<Option<String>,_>("irregularReason").unwrap_or(None),
+        "status": row.try_get::<String,_>("status").unwrap_or_default(),
+        "recordedHours": row.try_get::<f64,_>("recordedHours").unwrap_or(0.0),
+        "creditedHours": row.try_get::<f64,_>("creditedHours").unwrap_or(0.0),
+        "reviewerId": row.try_get::<Option<String>,_>("reviewerId").unwrap_or(None),
+        "reviewerRemarks": row.try_get::<Option<String>,_>("reviewerRemarks").unwrap_or(None),
+        "reviewedAt": row.try_get::<Option<chrono::DateTime<Utc>>,_>("reviewedAt").ok().flatten().map(|d| d.to_rfc3339()),
+        "correctedById": row.try_get::<Option<String>,_>("correctedById").unwrap_or(None),
+        "correctionReason": row.try_get::<Option<String>,_>("correctionReason").unwrap_or(None),
+        "correctedAt": row.try_get::<Option<chrono::DateTime<Utc>>,_>("correctedAt").ok().flatten().map(|d| d.to_rfc3339()),
+        "createdAt": row.try_get::<chrono::DateTime<Utc>,_>("createdAt").map(|d| d.to_rfc3339()).unwrap_or_default(),
+        "updatedAt": row.try_get::<chrono::DateTime<Utc>,_>("updatedAt").map(|d| d.to_rfc3339()).unwrap_or_default(),
+    })
 }
 
 async fn list(
@@ -90,76 +147,72 @@ async fn list(
         })
         .collect();
 
-    // build where clause
-    let _cond: Vec<String> = Vec::new();
-    let _params: Vec<String> = Vec::new(); // we'll bind dynamically via query builder? sqlx needs typed; use string params only for text, handle ints separately. Simpler: build SQL with placeholders and bind in order using a Vec of enum? sqlx query runtime allows .bind any type but chain must match. We'll do sequential binds with a macro-like approach using a helper query string and then bind each.
-
-    // We'll instead fetch all rows then filter/paginate in Rust for prototype simplicity.
-    // But total count needed. We'll fetch all matching attendance logs (with role filter) then paginate.
-    let base_sql = "SELECT a.id, a.\"studentId\", a.\"batchId\", a.\"scheduleId\", a.\"shiftDate\"::timestamptz, a.\"timeIn\"::timestamptz, a.\"timeOut\"::timestamptz, a.\"photoInKey\", a.\"photoOutKey\", a.\"isIrregular\", a.\"irregularReason\", a.status::text, a.\"recordedHours\", a.\"creditedHours\", a.\"createdAt\"::timestamptz FROM \"AttendanceLog\" a JOIN \"Batch\" b ON a.\"batchId\"=b.id JOIN \"User\" u ON a.\"studentId\"=u.id";
-
-    // We'll collect rows with a dynamic filter by building SQL.
-    // Simpler: fetch all then filter in Rust.
-    let all_rows = sqlx::query(base_sql).fetch_all(&state.db).await?;
-
-    let mut filtered: Vec<sqlx::postgres::PgRow> = Vec::new();
-    for r in all_rows {
-        // role filter
-        let _student_id: String = r.try_get("studentId").unwrap_or_default();
-        // need batch coordinator; re-query? We didn't include. Let's instead filter by re-fetching batch. For prototype, handle student/admin.
-        // We'll apply filters below using a second pass with DB? This is getting messy.
-        filtered.push(r);
-    }
-    // This approach is too weak for role filtering. Let's instead do role filtering via SQL joins including coordinator.
-
-    // Redo: fetch with proper role filters using conditional SQL.
-    // Build query string
-    let mut where_clauses: Vec<String> = Vec::new();
-    // role
+    let mut count_query = QueryBuilder::new(
+        "SELECT COUNT(*) as c FROM \"AttendanceLog\" a JOIN \"Batch\" b ON a.\"batchId\"=b.id JOIN \"User\" u ON a.\"studentId\"=u.id WHERE TRUE",
+    );
+    let mut data_query = QueryBuilder::new(
+        "SELECT a.id, a.\"studentId\", a.\"batchId\", a.\"scheduleId\", a.\"shiftDate\"::timestamptz, a.\"timeIn\"::timestamptz, a.\"timeOut\"::timestamptz, a.\"photoInKey\", a.\"photoOutKey\", a.\"isIrregular\", a.\"irregularReason\", a.status::text, a.\"recordedHours\", a.\"creditedHours\", a.\"reviewerId\", a.\"reviewerRemarks\", a.\"reviewedAt\"::timestamptz, a.\"createdAt\"::timestamptz, u.\"fullName\" as student_name, u.\"studentIdNo\" as student_no FROM \"AttendanceLog\" a JOIN \"Batch\" b ON a.\"batchId\"=b.id JOIN \"User\" u ON a.\"studentId\"=u.id WHERE TRUE",
+    );
     if auth.0.role == "STUDENT" {
-        where_clauses.push(format!(
-            "a.\"studentId\" = '{}'",
-            auth.0.sub.replace('\'', "''")
-        ));
+        count_query
+            .push(" AND a.\"studentId\" = ")
+            .push_bind(&auth.0.sub);
+        data_query
+            .push(" AND a.\"studentId\" = ")
+            .push_bind(&auth.0.sub);
     } else if auth.0.role == "ADMIN" {
-        where_clauses.push(format!(
-            "b.\"coordinatorId\" = '{}'",
-            auth.0.sub.replace('\'', "''")
-        ));
+        count_query
+            .push(" AND b.\"coordinatorId\" = ")
+            .push_bind(&auth.0.sub);
+        data_query
+            .push(" AND b.\"coordinatorId\" = ")
+            .push_bind(&auth.0.sub);
     }
     if !search.is_empty() {
-        where_clauses.push(format!(
-            "u.\"fullName\" ILIKE '%{}%'",
-            search.replace('\'', "''").replace('%', "\\%")
-        ));
+        let pattern = format!(
+            "%{}%",
+            search
+                .replace('!', "!!")
+                .replace('%', "!%")
+                .replace('_', "!_")
+        );
+        count_query
+            .push(" AND u.\"fullName\" ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" ESCAPE '!' ");
+        data_query
+            .push(" AND u.\"fullName\" ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" ESCAPE '!' ");
     }
     if let Some(s) = &status {
-        where_clauses.push(format!("a.status = '{}'", s.replace('\'', "''")));
+        count_query.push(" AND a.status::text = ").push_bind(s);
+        data_query.push(" AND a.status::text = ").push_bind(s);
     }
     if irregular.as_deref() == Some("true") {
-        where_clauses.push("a.\"isIrregular\" = true".to_string());
+        count_query.push(" AND a.\"isIrregular\" = TRUE");
+        data_query.push(" AND a.\"isIrregular\" = TRUE");
     }
-
-    let where_sql = if where_clauses.is_empty() {
-        String::new()
-    } else {
-        format!("WHERE {}", where_clauses.join(" AND "))
-    };
-    let count_sql = format!("SELECT COUNT(*) as c FROM \"AttendanceLog\" a JOIN \"Batch\" b ON a.\"batchId\"=b.id JOIN \"User\" u ON a.\"studentId\"=u.id {}", where_sql);
-    let total: i64 = sqlx::query(&count_sql)
+    let total: i64 = count_query
+        .build()
         .fetch_one(&state.db)
         .await?
         .try_get("c")
         .unwrap_or(0);
-
-    let data_sql = format!("SELECT a.id, a.\"studentId\", a.\"batchId\", a.\"scheduleId\", a.\"shiftDate\"::timestamptz, a.\"timeIn\"::timestamptz, a.\"timeOut\"::timestamptz, a.\"photoInKey\", a.\"photoOutKey\", a.\"isIrregular\", a.\"irregularReason\", a.status::text, a.\"recordedHours\", a.\"creditedHours\", a.\"createdAt\"::timestamptz, u.\"fullName\" as student_name, u.\"studentIdNo\" as student_no FROM \"AttendanceLog\" a JOIN \"Batch\" b ON a.\"batchId\"=b.id JOIN \"User\" u ON a.\"studentId\"=u.id {} ORDER BY a.\"shiftDate\"::timestamptz DESC, a.\"createdAt\"::timestamptz DESC LIMIT {} OFFSET {}", where_sql, page_size, skip);
-    let rows = sqlx::query(&data_sql).fetch_all(&state.db).await?;
+    let rows = data_query
+        .push(" ORDER BY a.\"shiftDate\" DESC, a.\"createdAt\" DESC LIMIT ")
+        .push_bind(page_size)
+        .push(" OFFSET ")
+        .push_bind(skip)
+        .build()
+        .fetch_all(&state.db)
+        .await?;
 
     // fetch schedule map
     let mut sched_map: std::collections::HashMap<String, serde_json::Value> =
         std::collections::HashMap::new();
     let scheds =
-        sqlx::query("SELECT id,label,\"startTime\",\"endTime\",\"graceMinutes\" FROM \"Schedule\"")
+        sqlx::query("SELECT id,label,\"startTime\",\"endTime\",\"graceMinutes\",\"batchId\",\"isActive\",\"createdAt\"::timestamptz FROM \"Schedule\"")
             .fetch_all(&state.db)
             .await
             .unwrap_or_default();
@@ -173,6 +226,9 @@ async fn list(
                 "startTime": s.try_get::<String,_>("startTime").unwrap_or_default(),
                 "endTime": s.try_get::<String,_>("endTime").unwrap_or_default(),
                 "graceMinutes": s.try_get::<i32,_>("graceMinutes").unwrap_or(0),
+                "batchId": s.try_get::<String,_>("batchId").unwrap_or_default(),
+                "isActive": s.try_get::<bool,_>("isActive").unwrap_or(true),
+                "createdAt": s.try_get::<chrono::DateTime<Utc>,_>("createdAt").map(|d| d.to_rfc3339()).unwrap_or_default(),
             }),
         );
     }
@@ -196,6 +252,9 @@ async fn list(
             "status": r.try_get::<String,_>("status").unwrap_or_default(),
             "recordedHours": r.try_get::<f64,_>("recordedHours").unwrap_or(0.0),
             "creditedHours": r.try_get::<f64,_>("creditedHours").unwrap_or(0.0),
+            "reviewerId": r.try_get::<Option<String>,_>("reviewerId").unwrap_or(None),
+            "reviewerRemarks": r.try_get::<Option<String>,_>("reviewerRemarks").unwrap_or(None),
+            "reviewedAt": r.try_get::<Option<chrono::DateTime<Utc>>,_>("reviewedAt").ok().flatten().map(|d| d.to_rfc3339()),
             "createdAt": r.try_get::<chrono::DateTime<Utc>,_>("createdAt").map(|d| d.to_rfc3339()).unwrap_or_default(),
             "student": {
                 "id": r.try_get::<String,_>("studentId").unwrap_or_default(),
@@ -218,7 +277,7 @@ async fn create(
     State(state): State<AppState>,
     auth: AuthUser,
     mut multipart: Multipart,
-) -> Result<Json<serde_json::Value>> {
+) -> Result<Response> {
     if auth.0.role != "STUDENT" {
         return Err(AppError::Forbidden);
     }
@@ -228,11 +287,10 @@ async fn create(
     let mut schedule_id: Option<String> = None;
     let mut attendance_id: Option<String> = None;
     let mut shift_date: Option<String> = None;
-    let mut photo_bytes: Option<Vec<u8>> = None;
-    let mut photo_mime: Option<String> = None;
+    let mut photo: Option<(Vec<u8>, &'static str)> = None;
     let mut forbidden = false;
 
-    while let Some(field) = multipart
+    while let Some(mut field) = multipart
         .next_field()
         .await
         .map_err(|e| AppError::BadRequest(e.to_string()))?
@@ -276,12 +334,20 @@ async fn create(
                 );
             }
             "photo" => {
-                photo_mime = field.content_type().map(|s| s.to_string());
-                let bytes = field
-                    .bytes()
+                let bytes = read_field_capped(&mut field, MAX_UPLOAD_BYTES)
                     .await
-                    .map_err(|e| AppError::BadRequest(e.to_string()))?;
-                photo_bytes = Some(bytes.to_vec());
+                    .map_err(|e| AppError::BadRequest(e.into()))?;
+                let (mime, ext) = sniff_mime(&bytes).ok_or_else(|| {
+                    AppError::BadRequest(
+                        "Time-In and Time-Out photos must be valid images up to 5 MB.".into(),
+                    )
+                })?;
+                if !mime.starts_with("image/") {
+                    return Err(AppError::BadRequest(
+                        "Time-In and Time-Out photos must be valid images up to 5 MB.".into(),
+                    ));
+                }
+                photo = Some((bytes, ext));
             }
             _ => {}
         }
@@ -295,19 +361,8 @@ async fn create(
     let action = action.ok_or_else(|| {
         AppError::BadRequest("Invalid attendance request. GPS fields are not supported.".into())
     })?;
-    let photo_bytes =
-        photo_bytes.ok_or_else(|| AppError::BadRequest("A photo is required.".into()))?;
-    let mime = photo_mime.unwrap_or_default();
-    if !mime.starts_with("image/") {
-        return Err(AppError::BadRequest(
-            "Time-In and Time-Out photos must be valid images up to 5 MB.".into(),
-        ));
-    }
-    if photo_bytes.is_empty() || photo_bytes.len() > 5 * 1024 * 1024 {
-        return Err(AppError::BadRequest(
-            "Time-In and Time-Out photos must be valid images up to 5 MB.".into(),
-        ));
-    }
+    let (photo_bytes, photo_ext) =
+        photo.ok_or_else(|| AppError::BadRequest("A photo is required.".into()))?;
 
     let batch_id = auth
         .0
@@ -336,8 +391,8 @@ async fn create(
             })
             .ok_or_else(|| AppError::BadRequest("Invalid shift date.".into()))?;
 
-        let shift_day = shift_date_parsed.with_timezone(&Utc).date_naive();
-        let today = Utc::now().date_naive();
+        let shift_day = shift_date_parsed.with_timezone(&manila_tz()).date_naive();
+        let today = Utc::now().with_timezone(&manila_tz()).date_naive();
         if shift_day > today {
             return Err(AppError::BadRequest(
                 "Shift date cannot be in the future.".into(),
@@ -359,8 +414,9 @@ async fn create(
         }
 
         let now = Utc::now();
-        // evaluate schedule window
-        let punch_minutes = now.hour() as i32 * 60 + now.minute() as i32;
+        // evaluate schedule window in local (Asia/Manila) time
+        let now_local = now.with_timezone(&manila_tz());
+        let punch_minutes = now_local.hour() as i32 * 60 + now_local.minute() as i32;
         let parse_tm = |s: &str| -> i32 {
             let parts: Vec<&str> = s.split(':').collect();
             let h = parts
@@ -396,19 +452,13 @@ async fn create(
         };
 
         // save photo
-        let ext = match mime.as_str() {
-            "image/png" => ".png",
-            "image/webp" => ".webp",
-            "application/pdf" => ".pdf",
-            _ => ".jpg",
-        };
-        let key = format!("attendance/{}{}", Uuid::new_v4(), ext);
+        let key = format!("attendance/{}{}", Uuid::new_v4(), photo_ext);
         crate::storage::save_bytes(&key, &photo_bytes)
             .await
             .map_err(|e| AppError::Internal(e.to_string()))?;
 
         let record_id = Uuid::new_v4().to_string();
-        sqlx::query("INSERT INTO \"AttendanceLog\" (id,\"studentId\",\"batchId\",\"scheduleId\",\"shiftDate\",\"timeIn\",\"photoInKey\",\"isIrregular\",\"irregularReason\",\"status\",\"recordedHours\",\"creditedHours\",\"createdAt\",\"updatedAt\") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'PENDING',0,0,NOW(),NOW())")
+        let insert = sqlx::query("INSERT INTO \"AttendanceLog\" (id,\"studentId\",\"batchId\",\"scheduleId\",\"shiftDate\",\"timeIn\",\"photoInKey\",\"isIrregular\",\"irregularReason\",\"status\",\"recordedHours\",\"creditedHours\",\"createdAt\",\"updatedAt\") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'PENDING',0,0,NOW(),NOW())")
             .bind(&record_id)
             .bind(&auth.0.sub)
             .bind(&batch_id)
@@ -418,13 +468,25 @@ async fn create(
             .bind(&key)
             .bind(is_irregular)
             .bind(irregular_reason.as_deref())
-            .execute(&state.db).await?;
+            .execute(&state.db).await;
+        if let Err(e) = insert {
+            let _ = tokio::fs::remove_file(crate::storage::storage_root().join(&key)).await;
+            if let sqlx::Error::Database(db) = &e {
+                if db.code().as_deref() == Some("23505") {
+                    return Err(AppError::Conflict(
+                        "An open attendance record already exists for today.".into(),
+                    ));
+                }
+            }
+            return Err(e.into());
+        }
 
-        let resp = json!({
-            "receipt": {"id": record_id, "action": "TIME_IN", "confirmedAt": Utc::now().to_rfc3339()},
-            "attendance": {"id": record_id, "studentId": auth.0.sub, "batchId": batch_id, "scheduleId": sid, "photoInKey": key, "isIrregular": is_irregular, "irregularReason": irregular_reason, "status": "PENDING"}
-        });
-        return Ok(Json(resp));
+        let attendance = attendance_row(&state, &record_id).await?;
+        let created_at: chrono::DateTime<Utc> = attendance.try_get("createdAt")?;
+        return Ok((StatusCode::CREATED, Json(json!({
+            "receipt": {"id": record_id, "action": "TIME_IN", "confirmedAt": created_at.to_rfc3339()},
+            "attendance": attendance_json(&attendance)
+        }))).into_response());
     }
 
     // TIME_OUT
@@ -442,13 +504,7 @@ async fn create(
             ));
         }
         let time_in: chrono::DateTime<Utc> = existing.try_get("timeIn")?;
-        let ext = match mime.as_str() {
-            "image/png" => ".png",
-            "image/webp" => ".webp",
-            "application/pdf" => ".pdf",
-            _ => ".jpg",
-        };
-        let key = format!("attendance/{}{}", Uuid::new_v4(), ext);
+        let key = format!("attendance/{}{}", Uuid::new_v4(), photo_ext);
         crate::storage::save_bytes(&key, &photo_bytes)
             .await
             .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -465,11 +521,13 @@ async fn create(
             .bind(now).bind(&key).bind(recorded).bind(&aid).execute(&mut *tx).await?;
         tx.commit().await?;
 
-        let resp = json!({
-            "receipt": {"id": aid, "action": "TIME_OUT", "confirmedAt": now.to_rfc3339()},
-            "attendance": {"id": aid, "timeOut": now.to_rfc3339(), "photoOutKey": key, "recordedHours": recorded}
-        });
-        return Ok(Json(resp));
+        let attendance = attendance_row(&state, &aid).await?;
+        let updated_at: chrono::DateTime<Utc> = attendance.try_get("updatedAt")?;
+        return Ok(Json(json!({
+            "receipt": {"id": aid, "action": "TIME_OUT", "confirmedAt": updated_at.to_rfc3339()},
+            "attendance": attendance_json(&attendance)
+        }))
+        .into_response());
     }
 
     Err(AppError::BadRequest(
@@ -554,14 +612,19 @@ async fn review(
     let rule = credit_rounding_rule(&state).await;
     let mut tx = state.db.begin().await?;
     let att = sqlx::query(
-        "SELECT a.\"studentId\", a.\"timeIn\"::timestamptz, a.\"timeOut\"::timestamptz, a.status::text, b.\"coordinatorId\" FROM \"AttendanceLog\" a JOIN \"Batch\" b ON a.\"batchId\"=b.id WHERE a.id=$1 FOR UPDATE",
+        "SELECT a.\"timeIn\"::timestamptz, a.\"timeOut\"::timestamptz, a.status::text AS att_status, b.\"coordinatorId\" FROM \"AttendanceLog\" a JOIN \"Batch\" b ON a.\"batchId\"=b.id WHERE a.id=$1 FOR UPDATE",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
     .await?
     .ok_or(AppError::NotFound)?;
-    let student_id: String = att.try_get("studentId")?;
     let coord: String = att.try_get("coordinatorId")?;
+    let current_status: String = att.try_get("att_status")?;
+    if current_status != "PENDING" {
+        return Err(AppError::Conflict(
+            "This attendance record has already been reviewed.".into(),
+        ));
+    }
     let ok = match auth.0.role.as_str() {
         "SUPERADMIN" => true,
         "ADMIN" => coord == auth.0.sub,
@@ -588,38 +651,13 @@ async fn review(
         0.0
     };
 
-    sqlx::query("UPDATE \"AttendanceLog\" SET status=$1,\"creditedHours\"=$2,\"reviewerId\"=$3,\"reviewerRemarks\"=$4,\"reviewedAt\"=NOW() WHERE id=$5")
+    let updated_rows = sqlx::query("UPDATE \"AttendanceLog\" SET status=$1::\"AttendanceStatus\",\"creditedHours\"=$2,\"reviewerId\"=$3,\"reviewerRemarks\"=$4,\"reviewedAt\"=NOW() WHERE id=$5 AND status='PENDING'")
         .bind(&b.status).bind(credited).bind(&auth.0.sub).bind(if remarks.trim().is_empty() { None } else { Some(remarks.trim()) }).bind(&id)
         .execute(&mut *tx).await?;
-    if b.status == "APPROVED" {
-        // check preOjt completion
-        let req_hours: f64 = sqlx::query("SELECT \"requiredHours\" FROM \"User\" WHERE id=$1")
-            .bind(&student_id)
-            .fetch_one(&mut *tx)
-            .await?
-            .try_get("requiredHours")
-            .unwrap_or(100.0);
-        let logs = sqlx::query(
-            "SELECT status::text,\"creditedHours\" FROM \"AttendanceLog\" WHERE \"studentId\"=$1",
-        )
-        .bind(&student_id)
-        .fetch_all(&mut *tx)
-        .await
-        .unwrap_or_default();
-        let total: f64 = logs
-            .iter()
-            .map(|r| {
-                if r.try_get::<String, _>("status").unwrap_or_default() == "APPROVED" {
-                    r.try_get::<f64, _>("creditedHours").unwrap_or(0.0)
-                } else {
-                    0.0
-                }
-            })
-            .sum();
-        let pending_tasks: i64 = sqlx::query("SELECT COUNT(*) as c FROM \"TaskAssignment\" WHERE \"studentId\"=$1 AND status::text<>'ACCEPTED'").bind(&student_id).fetch_one(&mut *tx).await?.try_get("c").unwrap_or(0);
-        if total >= req_hours && pending_tasks == 0 {
-            sqlx::query("UPDATE \"User\" SET \"preOjtCompleted\"=true,\"preOjtCompletedAt\"=NOW() WHERE id=$1").bind(&student_id).execute(&mut *tx).await?;
-        }
+    if updated_rows.rows_affected() == 0 {
+        return Err(AppError::Conflict(
+            "This attendance record has already been reviewed.".into(),
+        ));
     }
     crate::audit::write_audit_log_tx(
         &mut tx,
@@ -632,15 +670,8 @@ async fn review(
     .await
     .ok();
     tx.commit().await?;
-    let updated = sqlx::query("SELECT id,\"studentId\",\"batchId\",\"scheduleId\",\"shiftDate\"::timestamptz,\"timeIn\"::timestamptz,\"timeOut\"::timestamptz,\"photoInKey\",\"photoOutKey\",\"isIrregular\",\"irregularReason\",status::text,\"recordedHours\",\"creditedHours\",\"reviewerId\",\"reviewerRemarks\",\"reviewedAt\"::timestamptz,\"createdAt\"::timestamptz,\"updatedAt\"::timestamptz FROM \"AttendanceLog\" WHERE id=$1").bind(&id).fetch_one(&state.db).await?;
-    Ok(Json(json!({"attendance": {
-        "id": updated.try_get::<String,_>("id").unwrap_or_default(),
-        "status": updated.try_get::<String,_>("status").unwrap_or_default(),
-        "creditedHours": updated.try_get::<f64,_>("creditedHours").unwrap_or(0.0),
-        "reviewerId": updated.try_get::<Option<String>,_>("reviewerId").unwrap_or(None),
-        "reviewerRemarks": updated.try_get::<Option<String>,_>("reviewerRemarks").unwrap_or(None),
-        "reviewedAt": updated.try_get::<Option<chrono::DateTime<Utc>>,_>("reviewedAt").ok().flatten().map(|d| d.to_rfc3339()),
-    }})))
+    let updated = attendance_row(&state, &id).await?;
+    Ok(Json(json!({"attendance": attendance_json(&updated)})))
 }
 
 async fn correct(
@@ -727,16 +758,8 @@ async fn correct(
         .bind(time_in).bind(time_out).bind(recorded).bind(credited).bind(&auth.0.sub).bind(b.reason.trim()).bind(&id).execute(&mut *tx).await?;
     crate::audit::write_audit_log_tx(&mut tx, Some(&auth.0.sub), "ATTENDANCE_CORRECTED", "AttendanceLog", &id, json!({"before": {"timeIn": before_in.to_rfc3339(), "timeOut": before_out.map(|d| d.to_rfc3339())}, "after": {"timeIn": time_in.to_rfc3339(), "timeOut": time_out.map(|d| d.to_rfc3339())}, "reason": b.reason.trim()})).await.ok();
     tx.commit().await?;
-    let updated = sqlx::query("SELECT id,\"timeIn\"::timestamptz,\"timeOut\"::timestamptz,\"recordedHours\",\"correctedById\",\"correctionReason\",\"correctedAt\"::timestamptz FROM \"AttendanceLog\" WHERE id=$1").bind(&id).fetch_one(&state.db).await?;
-    Ok(Json(json!({"attendance": {
-        "id": updated.try_get::<String,_>("id").unwrap_or_default(),
-        "timeIn": updated.try_get::<chrono::DateTime<Utc>,_>("timeIn").map(|d| d.to_rfc3339()).unwrap_or_default(),
-        "timeOut": updated.try_get::<Option<chrono::DateTime<Utc>>,_>("timeOut").ok().flatten().map(|d| d.to_rfc3339()),
-        "recordedHours": updated.try_get::<f64,_>("recordedHours").unwrap_or(0.0),
-        "correctedById": updated.try_get::<Option<String>,_>("correctedById").unwrap_or(None),
-        "correctionReason": updated.try_get::<Option<String>,_>("correctionReason").unwrap_or(None),
-        "correctedAt": updated.try_get::<Option<chrono::DateTime<Utc>>,_>("correctedAt").ok().flatten().map(|d| d.to_rfc3339()),
-    }})))
+    let updated = attendance_row(&state, &id).await?;
+    Ok(Json(json!({"attendance": attendance_json(&updated)})))
 }
 
 async fn escalate(
@@ -744,7 +767,7 @@ async fn escalate(
     auth: AuthUser,
     Path(id): Path<String>,
     Json(body): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>> {
+) -> Result<Response> {
     if !["ADMIN", "SUPERADMIN"].contains(&auth.0.role.as_str()) {
         return Err(AppError::Forbidden);
     }
@@ -781,8 +804,8 @@ async fn escalate(
     .await
     .ok();
     tx.commit().await?;
-    let esc = sqlx::query("SELECT id,\"sourceType\",\"sourceId\",\"raisedById\",\"studentId\",summary,\"policyDetails\",status::text,\"createdAt\"::timestamptz FROM \"EscalationCase\" WHERE id=$1").bind(&eid).fetch_one(&state.db).await?;
-    Ok(Json(json!({"escalation": {
+    let esc = sqlx::query("SELECT id,\"sourceType\"::text,\"sourceId\",\"raisedById\",\"studentId\",summary,\"policyDetails\",status::text,\"rulingNote\",\"ruledById\",\"ruledAt\"::timestamptz,\"createdAt\"::timestamptz FROM \"EscalationCase\" WHERE id=$1").bind(&eid).fetch_one(&state.db).await?;
+    Ok((StatusCode::CREATED, Json(json!({"escalation": {
         "id": esc.try_get::<String,_>("id").unwrap_or_default(),
         "sourceType": esc.try_get::<String,_>("sourceType").unwrap_or_default(),
         "sourceId": esc.try_get::<String,_>("sourceId").unwrap_or_default(),
@@ -791,8 +814,11 @@ async fn escalate(
         "summary": esc.try_get::<String,_>("summary").unwrap_or_default(),
         "policyDetails": esc.try_get::<String,_>("policyDetails").unwrap_or_default(),
         "status": esc.try_get::<String,_>("status").unwrap_or_default(),
+        "rulingNote": esc.try_get::<Option<String>,_>("rulingNote").unwrap_or(None),
+        "ruledById": esc.try_get::<Option<String>,_>("ruledById").unwrap_or(None),
+        "ruledAt": esc.try_get::<Option<chrono::DateTime<Utc>>,_>("ruledAt").ok().flatten().map(|d| d.to_rfc3339()),
         "createdAt": esc.try_get::<chrono::DateTime<Utc>,_>("createdAt").map(|d| d.to_rfc3339()).unwrap_or_default(),
-    }})))
+    }}))).into_response())
 }
 
 async fn accreditation_pdf(
@@ -806,7 +832,7 @@ async fn accreditation_pdf(
     let student_id = q.student_id.unwrap_or_else(|| auth.0.sub.clone());
     // access check
     let student = sqlx::query(
-        "SELECT id,\"fullName\",\"studentIdNo\",program,section,\"requiredHours\",\"preOjtCompleted\",role::text, \
+        "SELECT id,\"fullName\",\"studentIdNo\",program,section,\"requiredHours\",role::text, \
          (SELECT \"coordinatorId\" FROM \"Batch\" WHERE id = \"User\".\"batchId\") AS coord \
          FROM \"User\" WHERE id=$1",
     )
@@ -825,17 +851,16 @@ async fn accreditation_pdf(
     if auth.0.role == "STUDENT" && student_id != auth.0.sub {
         return Err(AppError::NotFound);
     }
-    let pre_completed: bool = student.try_get("preOjtCompleted")?;
-    if !pre_completed {
-        return Err(AppError::BadRequest(
-            "Accreditation is available only for completed students.".into(),
-        ));
-    }
     let full_name: String = student.try_get("fullName")?;
     let student_id_no: Option<String> = student.try_get("studentIdNo").ok().flatten();
     let program: Option<String> = student.try_get("program").ok().flatten();
     let section: Option<String> = student.try_get("section").ok().flatten();
     let required_hours: f64 = student.try_get("requiredHours").unwrap_or(100.0);
+    if !is_pre_ojt_completed(&state.db, &student_id, required_hours).await? {
+        return Err(AppError::Conflict(
+            "Accreditation is available only for completed students.".into(),
+        ));
+    }
 
     let logs = sqlx::query(
         "SELECT \"shiftDate\"::date::text, \"timeIn\"::timestamptz, \"timeOut\"::timestamptz, \"creditedHours\", \"isIrregular\" \
@@ -854,8 +879,8 @@ async fn accreditation_pdf(
         let irregular: bool = r.try_get("isIrregular").unwrap_or(false);
         log_list.push(crate::pdf::AccreditationLog {
             shift_date: shift,
-            time_in: ti.format("%H:%M").to_string(),
-            time_out: to.map(|d| d.format("%H:%M").to_string()),
+            time_in: ti.with_timezone(&manila_tz()).format("%H:%M").to_string(),
+            time_out: to.map(|d| d.with_timezone(&manila_tz()).format("%H:%M").to_string()),
             credited_hours: credited,
             is_irregular: irregular,
         });

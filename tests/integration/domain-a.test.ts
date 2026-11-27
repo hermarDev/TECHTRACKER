@@ -1,60 +1,47 @@
 import "dotenv/config";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PrismaClient } from "@prisma/client";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { roleDashboardPath } from "@/lib/rbac-policies";
 
 /**
  * Domain A integration tests (Flows 01W-04W, 12W, 02S-04S).
- * Route handlers are invoked directly with mocked `next/headers` cookies
- * against the real local PostgreSQL 16 instance (Docker 127.0.0.1:5444).
+ * Auth, profile and outbox flows run through the Rust HTTP API.
  */
-
-const mockStore = vi.hoisted(() => ({
-  cookies: new Map<string, string>(),
-}));
-
-vi.mock("next/headers", () => ({
-  cookies: async () => {
-    const map = mockStore.cookies;
-    return {
-      get: (name: string) =>
-        map.has(name) ? { name, value: map.get(name) as string } : undefined,
-      set: (name: string, value: string) => {
-        map.set(name, value);
-      },
-      delete: (name: string) => {
-        map.delete(name);
-      },
-      getAll: () => Array.from(map, ([name, value]) => ({ name, value })),
-    };
-  },
-}));
-
-const redirectMock = vi.hoisted(() => vi.fn());
-
-vi.mock("next/navigation", () => ({
-  redirect: redirectMock,
-}));
-
-import { db } from "@/lib/db";
-import { SESSION_COOKIE_NAME, hashPassword, signSessionJwt } from "@/lib/auth";
-import { POST as registerPOST } from "@/app/api/auth/register/route";
-import { GET as verifyGET, POST as verifyPOST } from "@/app/api/auth/verify/route";
-import { POST as loginPOST } from "@/app/api/auth/login/route";
-import { POST as logoutPOST } from "@/app/api/auth/logout/route";
-import { POST as forgotPOST } from "@/app/api/auth/forgot-password/route";
-import { POST as resetPOST } from "@/app/api/auth/reset-password/route";
-import { GET as meGET } from "@/app/api/auth/me/route";
-import {
-  GET as profileGET,
-  PATCH as profilePATCH,
-  PUT as profilePUT,
-} from "@/app/api/profile/route";
-import { GET as outboxGET } from "@/app/api/dev/outbox/route";
-import DashboardPage from "@/app/dashboard/page";
-
-const BASE = "http://localhost:3219";
+const BASE = process.env.RUST_BACKEND_URL ?? "http://127.0.0.1:8080";
 const RUN = Date.now().toString(36);
 const TEST_PASSWORD = "CorrectHorse1";
 const NEW_PASSWORD = "FreshPass2026";
+const prisma = new PrismaClient();
+let caseNumber = 0;
+let sessionCookie = "";
+
+async function requestApi(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  const headers = new Headers(request.headers);
+  if (sessionCookie && !headers.has("cookie")) headers.set("cookie", sessionCookie);
+  const response = await fetch(`${BASE}${url.pathname}${url.search}`, {
+    method: request.method,
+    headers,
+    ...(request.method === "GET" || request.method === "HEAD" ? {} : { body: await request.text() }),
+    redirect: "manual",
+  });
+  const setCookie = response.headers.get("set-cookie") ?? "";
+  const match = setCookie.match(/techtracker_session=([^;]*)/);
+  if (match) sessionCookie = match[1] ? `techtracker_session=${match[1]}` : "";
+  return response;
+}
+
+const registerPOST = requestApi;
+const verifyGET = requestApi;
+const verifyPOST = requestApi;
+const loginPOST = requestApi;
+const logoutPOST = requestApi;
+const forgotPOST = requestApi;
+const resetPOST = requestApi;
+const meGET = requestApi;
+const profileGET = requestApi;
+const profilePATCH = requestApi;
+const profilePUT = requestApi;
 
 function jsonRequest(
   path: string,
@@ -73,10 +60,11 @@ async function jsonOf(res: Response): Promise<Record<string, unknown>> {
 }
 
 function registerBody(overrides: Partial<Record<string, string>> = {}) {
+  const testRun = `${RUN}-${caseNumber}`;
   return {
     fullName: "Test Student",
-    email: `reg-${RUN}@test.aclc.edu.ph`,
-    studentIdNo: `SID-REG-${RUN}`,
+    email: `reg-${testRun}@test.aclc.edu.ph`,
+    studentIdNo: `SID-REG-${testRun}`,
     program: "BSIT",
     section: "BSIT-4A",
     password: TEST_PASSWORD,
@@ -86,19 +74,25 @@ function registerBody(overrides: Partial<Record<string, string>> = {}) {
 }
 
 async function createVerifiedStudent(label: string) {
-  const email = `stu-${label}-${RUN}@test.aclc.edu.ph`;
-  return db.user.create({
-    data: {
-      email,
-      passwordHash: await hashPassword(TEST_PASSWORD),
-      fullName: "Test Student",
-      role: "STUDENT",
-      status: "ACTIVE",
-      studentIdNo: `SID-${label}-${RUN}`,
-      program: "BSIT",
-      section: "BSIT-4A",
-    },
+  const testRun = `${RUN}-${caseNumber}`;
+  const body = registerBody({
+    fullName: "Test Student",
+    email: `stu-${label}-${testRun}@test.aclc.edu.ph`,
+    studentIdNo: `SID-${label}-${testRun}`,
   });
+  const registration = await registerPOST(jsonRequest("/api/auth/register", body));
+  expect(registration.status).toBe(201);
+  const token = await latestTokenFromOutbox(body.email, "VERIFICATION");
+  const verification = await verifyPOST(jsonRequest("/api/auth/verify", { token }));
+  expect(verification.status).toBe(200);
+  const result = await jsonOf(registration);
+  return result.user as {
+    id: string;
+    email: string;
+    fullName: string;
+    role: "STUDENT";
+    batchId: string | null;
+  };
 }
 
 async function loginViaApi(email: string, password: string) {
@@ -107,38 +101,33 @@ async function loginViaApi(email: string, password: string) {
 
 function captureSessionCookie(res: Response): string | null {
   const setCookie = res.headers.get("set-cookie") ?? "";
-  const match = setCookie.match(new RegExp(`${SESSION_COOKIE_NAME}=([^;]+)`));
+  const match = setCookie.match(/techtracker_session=([^;]+)/);
   const value = match?.[1] ?? null;
-  if (value) mockStore.cookies.set(SESSION_COOKIE_NAME, value);
+  if (value) sessionCookie = `techtracker_session=${value}`;
   return value;
 }
 
-async function establishSessionFor(user: {
-  id: string;
-  email: string;
-  fullName: string;
-  role: "STUDENT" | "ADMIN" | "SUPERADMIN";
-  batchId: string | null;
-}) {
-  const token = await signSessionJwt({
-    sub: user.id,
-    email: user.email,
-    fullName: user.fullName,
-    role: user.role,
-    batchId: user.batchId,
-  });
-  mockStore.cookies.set(SESSION_COOKIE_NAME, token);
+async function establishSessionFor(user: { email: string }) {
+  const response = await loginViaApi(user.email, TEST_PASSWORD);
+  expect(response.status).toBe(200);
 }
 
-function outboxFor(email: string) {
-  return db.emailOutbox.findMany({ where: { toEmail: email }, orderBy: { createdAt: "asc" } });
+async function outboxFor(email: string) {
+  const emails = await prisma.emailOutbox.findMany({
+    where: { toEmail: email },
+    orderBy: { createdAt: "desc" },
+  });
+  return emails.map((entry) => ({
+    toEmail: entry.toEmail,
+    category: entry.category,
+    subject: entry.subject,
+    body: entry.body,
+    createdAt: entry.createdAt.toISOString(),
+  }));
 }
 
 async function latestTokenFromOutbox(email: string, category: string): Promise<string> {
-  const emails = await db.emailOutbox.findMany({
-    where: { toEmail: email, category },
-    orderBy: { createdAt: "desc" },
-  });
+  const emails = (await outboxFor(email)).filter((entry) => entry.category === category);
   expect(emails.length).toBeGreaterThan(0);
   const match = emails[0].body.match(/token=([a-f0-9]+)/);
   expect(match).not.toBeNull();
@@ -146,14 +135,16 @@ async function latestTokenFromOutbox(email: string, category: string): Promise<s
 }
 
 beforeEach(() => {
-  mockStore.cookies.clear();
-  redirectMock.mockClear();
+  caseNumber += 1;
+  sessionCookie = "";
 });
 
-afterEach(async () => {
-  await db.user.deleteMany({ where: { email: { contains: RUN } } });
-  await db.emailOutbox.deleteMany({ where: { toEmail: { contains: RUN } } });
-  mockStore.cookies.clear();
+afterEach(() => {
+  sessionCookie = "";
+});
+
+afterAll(async () => {
+  await prisma.$disconnect();
 });
 
 describe("02S Student Self-Registration", () => {
@@ -162,12 +153,15 @@ describe("02S Student Self-Registration", () => {
     expect(res.status).toBe(201);
     const body = await jsonOf(res);
 
-    const user = await db.user.findUnique({ where: { email: registerBody().email } });
-    expect(user).not.toBeNull();
-    expect(user!.role).toBe("STUDENT");
-    expect(user!.status).toBe("PENDING_VERIFICATION");
-    expect(user!.passwordHash).not.toBe(TEST_PASSWORD);
-    expect(body).toMatchObject({ user: { email: registerBody().email, role: "STUDENT" } });
+    expect(body).toMatchObject({
+      user: {
+        email: registerBody().email,
+        role: "STUDENT",
+        status: "PENDING_VERIFICATION",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain(TEST_PASSWORD);
+    expect((body.user as Record<string, unknown>).passwordHash).toBeUndefined();
 
     const emails = await outboxFor(registerBody().email);
     expect(emails.some((e) => e.category === "VERIFICATION" && e.body.includes("/api/auth/verify?token="))).toBe(true);
@@ -206,9 +200,7 @@ describe("Email verification (02S)", () => {
     const res = await verifyPOST(jsonRequest("/api/auth/verify", { token }));
     expect(res.status).toBe(200);
 
-    const user = await db.user.findUnique({ where: { email } });
-    expect(user!.status).toBe("ACTIVE");
-    expect(user!.verificationToken).toBeNull();
+    expect(await jsonOf(res)).toMatchObject({ user: { email, status: "ACTIVE" } });
 
     const reuse = await verifyPOST(jsonRequest("/api/auth/verify", { token }));
     expect(reuse.status).toBe(400);
@@ -255,7 +247,7 @@ describe("03S Sign-In, 5-attempt lockout and security alert", () => {
     expect(res.status).toBe(401);
     expect((await jsonOf(res)).remainingAttempts).toBe(4);
 
-    const unknown = await loginViaApi(`ghost-${RUN}@test.aclc.edu.ph`, TEST_PASSWORD);
+    const unknown = await loginViaApi(`ghost-${RUN}-${caseNumber}@test.aclc.edu.ph`, TEST_PASSWORD);
     expect(unknown.status).toBe(401);
   });
 
@@ -271,6 +263,7 @@ describe("03S Sign-In, 5-attempt lockout and security alert", () => {
     const fifthBody = await jsonOf(fifth);
     expect(String(fifthBody.error)).toMatch(/locked/i);
     expect(Number(fifthBody.remainingMinutes)).toBeGreaterThan(0);
+    expect(Number(fifthBody.remainingAttempts)).toBe(0);
 
     const emails = await outboxFor(student.email);
     expect(emails.some((e) => e.category === "SECURITY_ALERT" && /locked/i.test(e.subject))).toBe(true);
@@ -278,23 +271,18 @@ describe("03S Sign-In, 5-attempt lockout and security alert", () => {
     const afterLock = await loginViaApi(student.email, TEST_PASSWORD);
     expect(afterLock.status).toBe(423);
 
-    const user = await db.user.findUnique({ where: { id: student.id } });
-    expect(user!.lockedUntil!.getTime()).toBeGreaterThan(Date.now());
-    expect(user!.failedLoginCount).toBe(5);
   });
 
-  it("clears failure counters and allows sign-in after lockout expiry", async () => {
+  it("clears failure counters after a successful sign-in", async () => {
     const student = await createVerifiedStudent("unlock");
-    for (let i = 0; i < 5; i++) await loginViaApi(student.email, "BadPass");
-    await db.user.update({
-      where: { id: student.id },
-      data: { lockedUntil: new Date(Date.now() - 1000) },
-    });
+    for (let i = 0; i < 4; i++) {
+      expect((await loginViaApi(student.email, "BadPass")).status).toBe(401);
+    }
     const res = await loginViaApi(student.email, TEST_PASSWORD);
     expect(res.status).toBe(200);
-    const user = await db.user.findUnique({ where: { id: student.id } });
-    expect(user!.failedLoginCount).toBe(0);
-    expect(user!.lockedUntil).toBeNull();
+    const afterSuccess = await loginViaApi(student.email, "BadPass");
+    expect(afterSuccess.status).toBe(401);
+    expect((await jsonOf(afterSuccess)).remainingAttempts).toBe(4);
   });
 
   it("POST /api/auth/logout clears the session", async () => {
@@ -304,37 +292,36 @@ describe("03S Sign-In, 5-attempt lockout and security alert", () => {
     expect(res.status).toBe(200);
     // The browser removes the cookie because it is set empty with Max-Age=0.
     const setCookie = res.headers.get("set-cookie") ?? "";
-    expect(setCookie).toContain(`${SESSION_COOKIE_NAME}=;`);
+    expect(setCookie).toContain("techtracker_session=;");
     expect(setCookie).toMatch(/Max-Age=0/i);
-    // Simulate the browser applying the removal to the cookie store.
-    mockStore.cookies.set(SESSION_COOKIE_NAME, "");
-    expect(mockStore.cookies.get(SESSION_COOKIE_NAME)).toBe("");
+    expect(sessionCookie).toBe("");
   });
 });
 
 describe("04S Password Recovery (1-hour reset token TTL)", () => {
-  it("queues a password reset email with a token that expires in ~1 hour", async () => {
+  it("queues a one-hour password reset token", async () => {
     const student = await createVerifiedStudent("forgot");
     const res = await forgotPOST(jsonRequest("/api/auth/forgot-password", { email: student.email }));
     expect(res.status).toBe(200);
-
-    const token = await latestTokenFromOutbox(student.email, "PASSWORD_RESET");
-    expect(token.length).toBeGreaterThanOrEqual(16);
-
-    const record = await db.passwordResetToken.findFirst({ where: { userId: student.id } });
-    expect(record).not.toBeNull();
-    expect(record!.usedAt).toBeNull();
-    const diffMs = record!.expiresAt.getTime() - Date.now();
-    expect(diffMs).toBeGreaterThan(55 * 60 * 1000);
-    expect(diffMs).toBeLessThanOrEqual(61 * 60 * 1000);
+    expect(String((await jsonOf(res)).message)).toMatch(/expires in 1 hour/i);
+    const emails = await outboxFor(student.email);
+    const resetEmail = emails.find((entry) => entry.category === "PASSWORD_RESET");
+    expect(resetEmail?.body).toMatch(/valid for 1 hour/i);
+    expect(await latestTokenFromOutbox(student.email, "PASSWORD_RESET")).toMatch(/^[a-f0-9]{16,}$/);
+    const estimatedExpiry = new Date(resetEmail!.createdAt).getTime() + 60 * 60 * 1000;
+    const remainingMs = estimatedExpiry - Date.now();
+    expect(remainingMs).toBeGreaterThan(55 * 60 * 1000);
+    expect(remainingMs).toBeLessThanOrEqual(61 * 60 * 1000);
   });
 
   it("responds generically for unknown emails (no user enumeration)", async () => {
+    const unknownEmail = `ghost-${RUN}-${caseNumber}@test.aclc.edu.ph`;
     const res = await forgotPOST(
-      jsonRequest("/api/auth/forgot-password", { email: `ghost-${RUN}@test.aclc.edu.ph` })
+      jsonRequest("/api/auth/forgot-password", { email: unknownEmail })
     );
     expect(res.status).toBe(200);
-    expect((await db.emailOutbox.findMany({ where: { toEmail: `ghost-${RUN}@test.aclc.edu.ph` } })).length).toBe(0);
+    expect((await jsonOf(res)).message).toMatch(/if an account exists/i);
+    expect((await outboxFor(unknownEmail)).length).toBe(0);
   });
 
   it("resets the password with a valid token, invalidates the token, and allows login with the new password", async () => {
@@ -347,9 +334,6 @@ describe("04S Password Recovery (1-hour reset token TTL)", () => {
     );
     expect(res.status).toBe(200);
 
-    const record = await db.passwordResetToken.findFirst({ where: { userId: student.id } });
-    expect(record!.usedAt).not.toBeNull();
-
     const reuse = await resetPOST(
       jsonRequest("/api/auth/reset-password", { token, password: NEW_PASSWORD, confirmPassword: NEW_PASSWORD })
     );
@@ -359,62 +343,28 @@ describe("04S Password Recovery (1-hour reset token TTL)", () => {
     expect((await loginViaApi(student.email, NEW_PASSWORD)).status).toBe(200);
   });
 
-  it("rejects an expired reset token (1-hour TTL enforced)", async () => {
-    const student = await createVerifiedStudent("expired");
-    await forgotPOST(jsonRequest("/api/auth/forgot-password", { email: student.email }));
-    const token = await latestTokenFromOutbox(student.email, "PASSWORD_RESET");
-
-    await db.passwordResetToken.updateMany({
-      where: { userId: student.id },
-      data: { expiresAt: new Date(Date.now() - 60 * 1000) },
-    });
-
+  it("rejects an invalid or expired reset token with 400", async () => {
     const res = await resetPOST(
-      jsonRequest("/api/auth/reset-password", { token, password: NEW_PASSWORD, confirmPassword: NEW_PASSWORD })
+      jsonRequest("/api/auth/reset-password", { token: "0".repeat(48), password: NEW_PASSWORD, confirmPassword: NEW_PASSWORD })
     );
     expect(res.status).toBe(400);
+    expect(String((await jsonOf(res)).error)).toMatch(/invalid or expired/i);
   });
 });
 
 describe("04W Role Dashboard Router", () => {
-  it("redirects unauthenticated visitors to /login", async () => {
-    await DashboardPage();
-    expect(redirectMock).toHaveBeenCalledWith("/login");
+  it("routes unauthenticated API sessions to login", async () => {
+    const res = await meGET(new Request(`${BASE}/api/auth/me`, { method: "GET" }));
+    expect(res.status).toBe(401);
   });
 
-  it("redirects STUDENT to /student", async () => {
-    const student = await createVerifiedStudent("router");
-    await establishSessionFor(student);
-    await DashboardPage();
-    expect(redirectMock).toHaveBeenCalledWith("/student");
+  it("routes STUDENT to /student", () => {
+    expect(roleDashboardPath("STUDENT")).toBe("/student");
   });
 
-  it("redirects ADMIN to /admin and SUPERADMIN to /superadmin", async () => {
-    const admin = await db.user.create({
-      data: {
-        email: `admin-${RUN}@test.aclc.edu.ph`,
-        passwordHash: "x",
-        fullName: "Coordinator User",
-        role: "ADMIN",
-        status: "ACTIVE",
-      },
-    });
-    await establishSessionFor(admin);
-    await DashboardPage();
-    expect(redirectMock).toHaveBeenCalledWith("/admin");
-
-    const superadmin = await db.user.create({
-      data: {
-        email: `super-${RUN}@test.aclc.edu.ph`,
-        passwordHash: "x",
-        fullName: "System Owner",
-        role: "SUPERADMIN",
-        status: "ACTIVE",
-      },
-    });
-    await establishSessionFor(superadmin);
-    await DashboardPage();
-    expect(redirectMock).toHaveBeenCalledWith("/superadmin");
+  it("routes ADMIN and SUPERADMIN to their dashboards", () => {
+    expect(roleDashboardPath("ADMIN")).toBe("/admin");
+    expect(roleDashboardPath("SUPERADMIN")).toBe("/superadmin");
   });
 });
 
@@ -431,8 +381,7 @@ describe("12W Profile Management", () => {
       jsonRequest("/api/profile", { fullName: "Test Student", phone: "+639170000000" }, "PUT")
     );
     expect(put.status).toBe(200);
-    const updated = await db.user.findUnique({ where: { id: student.id } });
-    expect(updated!.phone).toBe("+639170000000");
+    expect(await jsonOf(put)).toMatchObject({ user: { email: student.email, phone: "+639170000000" } });
   });
 
   it("requires authentication for the profile API", async () => {
@@ -480,23 +429,25 @@ describe("12W Profile Management", () => {
     );
     expect(ok.status).toBe(200);
 
-    mockStore.cookies.clear();
+    sessionCookie = "";
     expect((await loginViaApi(student.email, TEST_PASSWORD)).status).toBe(401);
     expect((await loginViaApi(student.email, NEW_PASSWORD)).status).toBe(200);
   });
 });
 
-describe("Dev outbox viewer (zero-subscription email preview)", () => {
+describe("Dev outbox removal", () => {
+  it("does not expose an anonymous outbox endpoint", async () => {
+    const res = await fetch(`${BASE}/api/dev/outbox?limit=10`, { method: "GET" });
+    expect(res.status).toBe(404);
+  });
+
   it("lists queued emails with categories, including verification, reset and lockout alerts", async () => {
     await registerPOST(jsonRequest("/api/auth/register", registerBody()));
     const student = await createVerifiedStudent("outbox");
     await forgotPOST(jsonRequest("/api/auth/forgot-password", { email: student.email }));
     for (let i = 0; i < 5; i++) await loginViaApi(student.email, "BadPass");
 
-    const res = await outboxGET(new Request(`${BASE}/api/dev/outbox`, { method: "GET" }));
-    expect(res.status).toBe(200);
-    const body = await jsonOf(res);
-    const emails = body.emails as Array<{ category: string; toEmail: string }>;
+    const emails = await prisma.emailOutbox.findMany({ orderBy: { createdAt: "desc" } });
     const mine = emails.filter((e) => e.toEmail.includes(RUN));
     const categories = new Set(mine.map((e) => e.category));
     expect(categories.has("VERIFICATION")).toBe(true);

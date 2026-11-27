@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/types";
 import {
   CheckCircle2,
   CircleAlert,
@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { AppShell } from "@/components/shell/AppShell";
+import { StatusBadge } from "@/components/shell/StatusBadge";
 import { useDraftForm } from "@/hooks/useDraftForm";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -231,7 +232,7 @@ export default function RoomChecklistPage() {
   if (!room) {
     return (
       <AppShell user={user} unreadNotifications={unread} title="Lab Unit Checklist">
-        <div className="rounded-sm border border-border bg-card p-6">
+        <div className="rounded-xl border border-border bg-card p-6 shadow-xs">
           <p className="font-medium">Room not available</p>
           <p className="mt-1 text-sm text-muted-foreground">
             This laboratory room does not exist or is not assigned to your account.
@@ -296,7 +297,7 @@ export default function RoomChecklistPage() {
         )}
 
         {/* Summary strip */}
-        <section className="grid gap-3 rounded-sm border border-border bg-card p-4 sm:grid-cols-3">
+        <section className="grid gap-3 rounded-xl border border-border bg-card p-5 shadow-xs sm:grid-cols-4">
           <div>
             <p className="text-xs text-muted-foreground">Units in room</p>
             <p className="text-lg font-semibold tabular-ledger">{room.units.length}</p>
@@ -306,12 +307,18 @@ export default function RoomChecklistPage() {
             <p className="text-lg font-semibold tabular-ledger">{flaggedCount}</p>
           </div>
           <div>
+            <p className="text-xs text-muted-foreground">Missing required remarks</p>
+            <p className={`text-lg font-semibold tabular-ledger ${missingRemarksCount > 0 ? "text-destructive" : ""}`}>
+              {missingRemarksCount}
+            </p>
+          </div>
+          <div>
             <p className="text-xs text-muted-foreground">Photo evidence attached</p>
             <p className="text-lg font-semibold tabular-ledger">{photoCount}</p>
           </div>
         </section>
 
-        <section className="grid gap-3 rounded-sm border border-border bg-card p-4">
+        <section className="grid gap-3 rounded-xl border border-border bg-card p-5 shadow-xs">
           <Label htmlFor="summary-note">Session summary note (optional)</Label>
           <Textarea
             id="summary-note"
@@ -334,18 +341,30 @@ export default function RoomChecklistPage() {
             const needsRemarks = item.condition !== "FUNCTIONING";
             const remarksInvalid = needsRemarks && item.remarks.trim() === "";
             return (
-              <article key={unit.id} className="grid gap-3 rounded-sm border border-border bg-card p-4">
+              <article
+                key={unit.id}
+                className={`grid gap-3 rounded-xl border bg-card p-5 shadow-xs ${
+                  item.condition === "NEEDS_REPAIR"
+                    ? "border-destructive/50"
+                    : item.condition === "NEEDS_MAINTENANCE"
+                      ? "border-warning-surface/60"
+                      : "border-border"
+                }`}
+              >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-3">
                     <span className="flex size-8 items-center justify-center rounded-md bg-muted font-mono text-xs tabular-ledger">
                       {index + 1}
                     </span>
                     <div>
-                      <p className="font-mono text-sm font-semibold tabular-ledger">{unit.unitCode}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-mono text-sm font-semibold tabular-ledger">{unit.unitCode}</p>
+                        <StatusBadge status={item.condition} />
+                      </div>
                       <p className="text-xs text-muted-foreground">Workstation unit</p>
                     </div>
                   </div>
-                  <select aria-label={`Condition for unit ${unit.unitCode}`} value={item.condition} onChange={(event) => updateItem(unit.id, { condition: event.target.value as Condition })} className="min-h-11 w-48 max-w-full rounded-sm border border-input bg-background px-3 text-sm">
+                  <select aria-label={`Condition for unit ${unit.unitCode}`} value={item.condition} onChange={(event) => updateItem(unit.id, { condition: event.target.value as Condition })} className="min-h-11 w-48 max-w-full rounded-lg border border-input/70 bg-background px-3 text-sm">
                     {CONDITIONS.map((condition) => <option key={condition} value={condition}>{condition === "FUNCTIONING" ? "Functioning" : condition === "NEEDS_MAINTENANCE" ? "Needs Maintenance" : "Needs Repair"}</option>)}
                   </select>
                 </div>
@@ -425,7 +444,7 @@ export default function RoomChecklistPage() {
             );
           })}
           {room.units.length === 0 && (
-            <p className="rounded-sm border border-border bg-card p-6 text-sm text-muted-foreground">
+            <p className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground shadow-xs">
               No workstation units are configured for this room yet.
             </p>
           )}
@@ -439,7 +458,7 @@ export default function RoomChecklistPage() {
           </Alert>
         )}
 
-        <section className="sticky bottom-20 z-20 flex flex-wrap items-center justify-between gap-3 rounded-sm border border-border bg-card/95 p-4 lg:bottom-4">
+        <section className="sticky bottom-20 z-20 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card/95 p-4 shadow-md backdrop-blur-xs lg:bottom-4">
           <div className="text-sm text-muted-foreground">
             <span className="tabular-ledger">{room.units.length}</span> units ·{" "}
             <span className="tabular-ledger">{flaggedCount}</span> flagged ·{" "}

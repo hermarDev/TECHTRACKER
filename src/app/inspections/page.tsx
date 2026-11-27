@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { CheckCircle2, CircleAlert, ClipboardList, FileDown, FileText, Wrench } from "lucide-react";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/types";
 
 import { AppShell } from "@/components/shell/AppShell";
 import { StatusBadge } from "@/components/shell/StatusBadge";
@@ -186,12 +186,12 @@ export default function InspectionsPage() {
             </p>
           </div>
           {rooms.length === 0 ? (
-            <p className="rounded-sm border border-border bg-card p-6 text-sm text-muted-foreground">
+            <p className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground shadow-xs">
               No laboratory rooms are assigned yet. Coordinate with the Pre-OJT office to get a room
               assignment.
             </p>
           ) : (
-            <ul className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <ul className="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {rooms.map((room) => {
                 const functioning = room.units.filter((u) => u.condition === "FUNCTIONING").length;
                 const maintenance = room.units.filter((u) => u.condition === "NEEDS_MAINTENANCE").length;
@@ -199,7 +199,7 @@ export default function InspectionsPage() {
                 return (
                   <li
                     key={room.id}
-                    className="flex flex-col gap-3 rounded-sm border border-border bg-card p-4 [&_a]:max-w-full [&_a]:whitespace-normal"
+                    className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5 shadow-xs [&_a]:max-w-full [&_a]:whitespace-normal"
                   >
                     <div>
                       <p className="font-semibold">{room.name}</p>
@@ -245,7 +245,7 @@ export default function InspectionsPage() {
         </section>
 
         {/* 09W — Recent inspection submissions */}
-        <section aria-labelledby="recent-heading" className="rounded-sm border border-border bg-card p-4 lg:p-5">
+        <section aria-labelledby="recent-heading" className="rounded-xl border border-border bg-card p-5 shadow-xs lg:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3 [&>label]:min-w-0 [&>label]:max-w-full [&_select]:min-w-0 [&_select]:max-w-full">
             <h2 id="recent-heading" className="text-base font-semibold">
               Recent inspections
@@ -253,6 +253,11 @@ export default function InspectionsPage() {
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               Status
               <Select
+                items={[
+                  { value: "ALL", label: "All statuses" },
+                  { value: "SUBMITTED", label: "Submitted" },
+                  { value: "REVIEWED", label: "Reviewed" },
+                ]}
                 value={statusFilter || "ALL"}
                 onValueChange={(value) => {
                   setPage(1);

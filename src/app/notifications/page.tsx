@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Bell, BellRing, CheckCheck, CheckCircle2, CircleAlert, MailOpen } from "lucide-react";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/types";
 
 import { AppShell } from "@/components/shell/AppShell";
 import { StatusBadge } from "@/components/shell/StatusBadge";
@@ -153,7 +153,7 @@ export default function NotificationsPage() {
           </Alert>
         )}
 
-        <section className="flex flex-wrap items-center justify-between gap-3 rounded-sm border border-border bg-card p-4 [&_button]:max-w-full [&_button]:whitespace-normal">
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-5 shadow-xs [&_button]:max-w-full [&_button]:whitespace-normal">
           <div className="flex items-center gap-3">
             <BellRing className="size-5 text-muted-foreground" aria-hidden="true" />
             <div>
@@ -190,7 +190,7 @@ export default function NotificationsPage() {
 
         <section aria-label="Notification inbox" className="grid gap-3">
           {visible.length === 0 ? (
-            <p className="rounded-sm border border-border bg-card p-6 text-sm text-muted-foreground">
+            <p className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground shadow-xs">
               {unreadOnly
                 ? "No unread notifications — you are all caught up."
                 : "No notifications yet. Activity notices will appear here as your duty records are processed."}
@@ -199,7 +199,7 @@ export default function NotificationsPage() {
             visible.map((notification) => (
               <article
                 key={notification.id}
-                className={`grid grid-cols-[minmax(0,1fr)] gap-2 rounded-sm border bg-card p-4 [&_a]:max-w-full [&_a]:whitespace-normal [&_button]:max-w-full [&_button]:whitespace-normal ${
+                className={`grid grid-cols-[minmax(0,1fr)] gap-2 rounded-xl border bg-card p-5 shadow-xs [&_a]:max-w-full [&_a]:whitespace-normal [&_button]:max-w-full [&_button]:whitespace-normal ${
                   notification.isRead ? "border-border" : "border-primary/30 bg-primary/[0.04]"
                 }`}
               >
@@ -246,7 +246,7 @@ export default function NotificationsPage() {
           )}
         </section>
 
-        <section className="min-w-0 max-w-full rounded-sm border border-border bg-card p-4 [&_div]:flex-wrap [&_button]:max-w-full [&_button]:whitespace-normal">
+        <section className="min-w-0 max-w-full rounded-xl border border-border bg-card p-4 shadow-xs [&_div]:flex-wrap [&_button]:max-w-full [&_button]:whitespace-normal">
           <DataTablePagination
             page={page}
             pageSize={pageSize}

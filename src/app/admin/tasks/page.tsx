@@ -5,6 +5,7 @@ import Link from "next/link";
 import { StatusBadge } from "@/components/shell/StatusBadge";
 import { AppShell } from "@/components/shell/AppShell";
 import { DataTablePagination } from "@/components/shell/DataTablePagination";
+import { formatSafeDate } from "@/lib/task-format";
 import { DataTableToolbar } from "@/components/shell/DataTableToolbar";
 import { toast } from "sonner";
 import { Loader2, Plus, Users, Calendar } from "lucide-react";
@@ -138,7 +139,10 @@ export default function AdminTasksPage() {
       const response = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          deadline: formData.deadline ? new Date(formData.deadline).toISOString() : "",
+        }),
       });
       if (response.ok) {
         toast.success("Task assigned successfully");
@@ -178,7 +182,7 @@ export default function AdminTasksPage() {
 
   return (
     <AppShell user={user} title="Task Assignment & Review" subtitle="Assign technical work and review completion reports.">
-      <section className="rounded-sm border border-border bg-card p-4 lg:p-5">
+      <section className="rounded-xl border border-border bg-card p-5 shadow-xs lg:p-6">
         <div className="flex flex-wrap items-center justify-end gap-2 pb-4 [&_button]:max-w-full [&_button]:whitespace-normal">
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger render={<button type="button" className={buttonVariants()} />}>
@@ -202,7 +206,18 @@ export default function AdminTasksPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="category">Category</Label>
-                  <Select value={formData.category || ""} onValueChange={(value) => setFormData({ ...formData, category: value || "" })}>
+                  <Select
+                    items={[
+                      { value: "PC Assembly", label: "PC Assembly" },
+                      { value: "OS Configuration", label: "OS Configuration" },
+                      { value: "Network Cabling", label: "Network Cabling" },
+                      { value: "Hardware Diagnostics", label: "Hardware Diagnostics" },
+                      { value: "Lab Maintenance", label: "Lab Maintenance" },
+                      { value: "General Technical", label: "General Technical" },
+                    ]}
+                    value={formData.category || ""}
+                    onValueChange={(value) => setFormData({ ...formData, category: value || "" })}
+                  >
                     <SelectTrigger id="category" className="h-11">
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
@@ -241,9 +256,22 @@ export default function AdminTasksPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="batchId">Batch (optional)</Label>
-                  <Select value={formData.batchId || "ALL"} onValueChange={(value) => setFormData({ ...formData, batchId: value === "ALL" ? "" : (value ?? "") })}>
+                  <Select
+                    items={[
+                      { value: "ALL", label: "All batches" },
+                      ...batches.map((batch) => ({ value: batch.id, label: `${batch.name} (${batch.section})` })),
+                    ]}
+                    value={formData.batchId || "ALL"}
+                    onValueChange={(value) => setFormData({ ...formData, batchId: value === "ALL" ? "" : (value ?? "") })}
+                  >
                     <SelectTrigger id="batchId" className="h-11">
-                      <SelectValue placeholder="All batches" />
+                      <SelectValue placeholder="All batches">
+                        {(value: string | null) => {
+                          if (value === "ALL") return "All batches";
+                          const batch = batches.find((item) => item.id === value);
+                          return batch ? `${batch.name} (${batch.section})` : "Batch unavailable";
+                        }}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="ALL">All batches</SelectItem>
@@ -299,6 +327,10 @@ export default function AdminTasksPage() {
             searchPlaceholder="Search tasks..."
             filters={
               <Select
+                items={statusOptions.map((status) => ({
+                  value: status,
+                  label: status === "ALL" ? "All Statuses" : status.replace("_", " "),
+                }))}
                 value={statusFilter || "ALL"}
                 onValueChange={(value) => { setPage(1); setStatusFilter(value === "ALL" ? "" : (value ?? "")); }}
               >
@@ -360,7 +392,7 @@ export default function AdminTasksPage() {
                           <TableCell className="text-muted-foreground">{task.category}</TableCell>
                           <TableCell className="tabular-ledger">{task.assignments.length}</TableCell>
                           <TableCell className="tabular-ledger">
-                            {new Date(task.deadline).toLocaleDateString()}
+                            {formatSafeDate(task.deadline)}
                           </TableCell>
                           <TableCell>
                             <StatusBadge status={status} />

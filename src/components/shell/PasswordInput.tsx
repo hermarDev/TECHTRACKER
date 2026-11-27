@@ -34,8 +34,8 @@ export const PasswordInput = React.forwardRef<HTMLInputElement, PasswordInputPro
               error && props.id ? `${props.id}-error` : props["aria-describedby"]
             }
             className={cn(
-              "peer h-12 rounded-md bg-[var(--field-surface,var(--card))] px-3.5 py-3 pr-11 text-base",
-              error ? "" : "border-border",
+              "peer h-12 rounded-lg bg-[var(--field-surface,var(--card))] px-3.5 py-3 pr-11 text-base",
+              error ? "" : "border-input/70",
               inputClassName
             )}
           />

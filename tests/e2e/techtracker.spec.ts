@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { PrismaClient } from "@prisma/client";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
 const PASSWORD = "TechTrack@2026";
@@ -136,9 +137,9 @@ async function selectFirstScheduledShift(page: Page): Promise<void> {
 
 test("public landing and auth entry have the required controls", async ({ page }) => {
   await visit(page, "/");
-  await expect(page.getByRole("heading", { name: /100-Hour Pre-OJT Monitoring/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Track duty hours/i })).toBeVisible();
   await expect(page.getByRole("link", { name: "Sign in" }).first()).toBeVisible();
-  await expect(page.getByRole("link", { name: "Register" }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "Create student account" }).first()).toBeVisible();
   await assertNoHorizontalOverflow(page, "/");
 
   await visit(page, "/login");
@@ -160,7 +161,7 @@ test("public landing and auth entry have the required controls", async ({ page }
   await expect(loginPassword).toHaveAttribute("type", "password");
 
   await visit(page, "/register");
-  await expect(page.getByRole("heading", { name: "Student Self-Registration" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Create student account" })).toBeVisible();
   await expect(page.locator("select, input[type=radio], [role=radio]")).toHaveCount(0);
   await expect(page.locator("body")).not.toContainText(/renter|landlord/i);
   await assertNoHorizontalOverflow(page, "/register");
@@ -174,7 +175,7 @@ test("invalid login reports an error without touching seeded accounts", async ({
   await expect(page.getByRole("alert").filter({ hasText: /invalid|failed|password|sign-in/i })).toContainText(/invalid|failed|password|sign-in/i);
 });
 
-test("registration creates a student and verification link in the dev outbox", async ({ page }) => {
+test("registration creates a student and verification link in the email outbox", async ({ page }) => {
   const stamp = Date.now();
   const email = `qa.${stamp}@student.aclc.edu.ph`;
   const studentId = `QA${stamp}`;
@@ -188,17 +189,22 @@ test("registration creates a student and verification link in the dev outbox", a
   await page.getByLabel("Section").fill("QA-E2E");
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
-  await page.getByRole("button", { name: "Register", exact: true }).click();
+  await page.getByRole("button", { name: "Create student account", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Registration received");
 
-  await visit(page, "/dev/outbox");
-  const emailCard = page.locator('[aria-label="Queued emails"] > *').filter({ hasText: email }).first();
-  await expect(emailCard).toBeVisible();
-  const emailBody = emailCard.locator("pre");
-  await expect(emailBody).toBeVisible();
-  const bodyText = (await emailBody.textContent()) ?? "";
+  const prisma = new PrismaClient();
+  let bodyText = "";
+  try {
+    const queued = await prisma.emailOutbox.findFirst({
+      where: { toEmail: email, category: "VERIFICATION" },
+      orderBy: { createdAt: "desc" },
+    });
+    bodyText = queued?.body ?? "";
+  } finally {
+    await prisma.$disconnect();
+  }
   const verificationUrl = bodyText.match(/https?:\/\/[^\s]+\/api\/auth\/verify\?token=[^\s]+/)?.[0];
-  expect(verificationUrl, "Verification URL must be exposed in the dev outbox").toBeTruthy();
+  expect(verificationUrl, "Verification URL must be stored in the email outbox").toBeTruthy();
 
   await page.goto(verificationUrl!);
   await expect(page).toHaveURL(/\/login\?verified=1$/);
@@ -208,7 +214,7 @@ test("registration creates a student and verification link in the dev outbox", a
   await page.locator("#password").fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page).toHaveURL(/\/student$/);
-  await expect(page.getByRole("heading", { name: "Student Dashboard", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your Pre-OJT progress", exact: true })).toBeVisible();
 });
 
 test("theme control toggles light/dark and persists System selection", async ({ page }) => {
@@ -231,8 +237,8 @@ test("theme control toggles light/dark and persists System selection", async ({ 
 
 test("student dashboard, attendance, tasks, inspections, messages, notifications and profile flow", async ({ page }) => {
   await loginAs(page, STUDENT_EMAIL, "/student");
-  await expect(page.getByText("Credited (Approved)", { exact: true })).toBeVisible();
-  await expect(page.locator("p").filter({ hasText: "Pending Review" }).first()).toBeVisible();
+  await expect(page.getByText(/Credited \(Approved\)/)).toBeVisible();
+  await expect(page.getByText(/Pending Review/).first()).toBeVisible();
   await expect(page.getByText("100-Hour Pre-OJT Ledger", { exact: true })).toBeVisible();
   await assertNoHorizontalOverflow(page, "/student");
   await expect(Boolean(await page.evaluate(() => Boolean((window as Window & { __geoRequested?: boolean }).__geoRequested)))).toBe(false);
@@ -260,15 +266,33 @@ test("student dashboard, attendance, tasks, inspections, messages, notifications
   const recordedDate = new Date(attendanceBody.attendance.timeIn).toLocaleDateString();
   await expect(page.locator("section").filter({ hasText: "My attendance" })).toContainText(recordedDate);
 
+  // Close the open attendance session with Time-Out so subsequent runs start clean.
+  await page.locator("#photo-upload").setInputFiles({
+    name: "qa-time-out.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    ),
+  });
+  const timeOutResponse = page.waitForResponse(
+    (response) => response.url().includes("/api/attendance") && response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Time-Out", exact: true }).first().click();
+  expect((await timeOutResponse).status()).toBe(200);
+  await expect(page.getByText(/Confirmed receipt:/).first()).toBeVisible();
+
   await expect(page.getByRole("button", { name: /Accreditation PDF Locked/i })).toBeDisabled();
 
   await visit(page, "/tasks");
   await expect(page.getByText("My Tasks", { exact: true })).toBeVisible();
+  await expect(page.locator("main")).not.toContainText("Invalid Date");
   const taskLink = page.locator('a[href^="/tasks/"]').first();
   await expect(taskLink).toHaveCount(1);
   await taskLink.click();
   await expect(page).toHaveURL(/\/tasks\/[^/]+$/);
   await expect(page.getByText("Completion Report", { exact: true })).toBeVisible();
+  await expect(page.locator("main")).not.toContainText("Invalid Date");
 
   await visit(page, "/inspections");
   await expect(page.getByText("Laboratory rooms", { exact: false })).toBeVisible();
@@ -367,6 +391,21 @@ test("coordinator administrative controls expose pagination, filters and exports
   expect(pdfHref).toBeTruthy();
   const pdfResponse = await page.request.get(new URL(pdfHref!, page.url()).toString());
   expect(pdfResponse.status()).toBe(200);
+
+  await page.locator("#report-type").click();
+  await page.getByRole("option", { name: "Task progress", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Export CSV", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "Generate report", exact: true }).click();
+  await expect(page.getByRole("link", { name: "Export CSV", exact: true })).toHaveAttribute("href", /type=task-progress/);
+
+  await visit(page, "/admin/tasks");
+  await expect(page.locator("main")).not.toContainText("Invalid Date");
+  const adminTaskLink = page.locator('a[href^="/admin/tasks/"]').first();
+  await expect(adminTaskLink).toBeVisible();
+  await adminTaskLink.click();
+  await expect(page).toHaveURL(/\/admin\/tasks\/[^/]+$/);
+  await expect(page.getByText("Latest Submission", { exact: true })).toBeVisible();
+  await expect(page.locator("main")).not.toContainText("Invalid Date");
 });
 
 test("coordinator screenshot", async ({ page }, testInfo) => {

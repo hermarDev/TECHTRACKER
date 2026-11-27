@@ -41,15 +41,26 @@ impl FromRequestParts<AppState> for AuthUser {
         let token = token.ok_or(AppError::Unauthorized)?;
         let payload = verify_session_jwt(&state.config, &token).ok_or(AppError::Unauthorized)?;
 
-        // A valid signature is not enough: suspended or deleted users must lose access immediately.
-        let row = sqlx::query("SELECT status::text FROM \"User\" WHERE id = $1")
-            .bind(&payload.sub)
-            .fetch_optional(&state.db)
-            .await?;
-        let status: String = row.ok_or(AppError::Unauthorized)?.try_get("status")?;
+        // A valid signature is not enough: suspended or deleted users must lose access immediately,
+        // and role/batch claims must match the database rather than a stale token.
+        let row = sqlx::query(
+            "SELECT status::text, role::text, \"batchId\", \"tokenVersion\" FROM \"User\" WHERE id = $1",
+        )
+        .bind(&payload.sub)
+        .fetch_optional(&state.db)
+        .await?;
+        let row = row.ok_or(AppError::Unauthorized)?;
+        let status: String = row.try_get("status")?;
         if status != "ACTIVE" {
             return Err(AppError::Unauthorized);
         }
+        let db_tv: i32 = row.try_get("tokenVersion")?;
+        if db_tv != payload.token_version {
+            return Err(AppError::Unauthorized);
+        }
+        let mut payload = payload;
+        payload.role = row.try_get("role")?;
+        payload.batch_id = row.try_get("batchId").unwrap_or(None);
 
         Ok(AuthUser(payload))
     }

@@ -1,20 +1,19 @@
 "use client";
 
 import * as React from "react";
+import Image from "next/image";
 import { AppShell } from "@/components/shell/AppShell";
-import { StatusBadge } from "@/components/shell/StatusBadge";
 import { DataTablePagination } from "@/components/shell/DataTablePagination";
 import { useDraftForm } from "@/hooks/useDraftForm";
 import { toast } from "sonner";
-import { Camera, Download, Image as ImageIcon, CheckCircle2, CircleAlert, Loader2, X } from "lucide-react";
+import { Camera, Download, Image as ImageIcon, CheckCircle2, Loader2, X } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 
 type User = { id: string; fullName: string; email: string; role: "STUDENT"; studentIdNo?: string | null; section?: string | null; preOjtCompleted?: boolean };
 type Attendance = { 
@@ -42,7 +41,6 @@ export default function AttendancePage() {
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [cameraStream, setCameraStream] = React.useState<MediaStream | null>(null);
   const [isCameraOpen, setIsCameraOpen] = React.useState(false);
-  const [capturedPhoto, setCapturedPhoto] = React.useState<string | null>(null);
   const [photoFile, setPhotoFile] = React.useState<File | null>(null);
   const [previewPhoto, setPreviewPhoto] = React.useState<string | null>(null);
   
@@ -62,7 +60,7 @@ export default function AttendancePage() {
         setTotal(data.total ?? data.items.length);
         setSchedules(data.schedules || []);
       }
-    } catch (error) {
+    } catch {
       toast.error("Failed to load attendance data");
     } finally {
       setIsLoading(false);
@@ -110,7 +108,6 @@ export default function AttendancePage() {
       setCameraStream(null);
     }
     setIsCameraOpen(false);
-    setCapturedPhoto(null);
   };
 
   // Every close path (Escape, overlay, close button) must release the camera.
@@ -134,7 +131,6 @@ export default function AttendancePage() {
     if (ctx) {
       ctx.drawImage(video, 0, 0);
       const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
-      setCapturedPhoto(dataUrl);
       // Convert to File
       fetch(dataUrl)
         .then(res => res.blob())
@@ -153,7 +149,6 @@ export default function AttendancePage() {
       setPhotoFile(file);
       const url = URL.createObjectURL(file);
       setPreviewPhoto(url);
-      setCapturedPhoto(null);
     }
   };
 
@@ -190,19 +185,39 @@ export default function AttendancePage() {
   if (!user) return <main className="p-8">Loading attendance...</main>;
 
   return (
-    <AppShell user={user} title="Attendance" subtitle="Photo-assisted duty log; no location tracking.">
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
-        <section className="rounded-sm border border-border bg-card p-4 lg:p-5">
-          <CardHeader className="pb-4">
-            <CardTitle>Record duty</CardTitle>
-            <CardDescription>Use the camera or choose an image file. GPS is never requested.</CardDescription>
+    <AppShell user={user} title="Attendance" subtitle="Record duty and review the status of previous punches.">
+      <div className="grid gap-6 lg:grid-cols-[380px_minmax(0,1fr)] lg:items-start">
+        <section className="rounded-xl border border-border bg-card p-5 shadow-xs lg:p-6">
+          <CardHeader className="px-0 pb-4">
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle>Record duty</CardTitle>
+              <span className="rounded-full border border-border bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                {items.some((item) => !item.timeOut) ? "Active shift" : "No active shift"}
+              </span>
+            </div>
+            <CardDescription>Select a shift and evidence. No GPS is requested.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-4 px-0 pb-0">
             <div className="space-y-2">
               <Label htmlFor="scheduleId">Scheduled shift</Label>
-              <Select value={form.values.scheduleId || ""} onValueChange={(value) => form.setValues({ scheduleId: value || "" })}>
+              <Select
+                items={schedules.map((schedule) => ({
+                  value: schedule.id,
+                  label: `${schedule.label} (${schedule.startTime}–${schedule.endTime})`,
+                }))}
+                value={form.values.scheduleId || ""}
+                onValueChange={(value) => form.setValues({ scheduleId: value || "" })}
+              >
                 <SelectTrigger className="h-11">
-                  <SelectValue placeholder="Select a scheduled shift" />
+                  <SelectValue placeholder="Select a scheduled shift">
+                    {(value: string | null) => {
+                      if (!value) return "Select a scheduled shift";
+                      const schedule = schedules.find((item) => item.id === value);
+                      return schedule
+                        ? `${schedule.label} (${schedule.startTime}–${schedule.endTime})`
+                        : "Scheduled shift unavailable";
+                    }}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {schedules.map((schedule) => (
@@ -281,10 +296,10 @@ export default function AttendancePage() {
                 />
                 {previewPhoto && (
                   <div className="relative w-fit">
-                    <img src={previewPhoto} alt="Preview" className="h-24 w-24 object-cover rounded-lg border" />
+                    <Image src={previewPhoto} alt="Preview" width={96} height={96} unoptimized className="h-24 w-24 rounded-lg border object-cover" />
                     <button
                       type="button"
-                      onClick={() => { setPhotoFile(null); setPreviewPhoto(null); setCapturedPhoto(null); }}
+                      onClick={() => { setPhotoFile(null); setPreviewPhoto(null); }}
                       className="absolute -top-2 -right-2 rounded-full bg-destructive text-destructive-foreground size-6 hover:bg-destructive/90"
                       aria-label="Remove photo"
                     >
@@ -306,8 +321,8 @@ export default function AttendancePage() {
           </CardContent>
         </section>
 
-        <section className="rounded-sm border border-border bg-card p-4 lg:p-5">
-          <CardHeader className="pb-4 flex flex-wrap items-center justify-between gap-3">
+        <section className="rounded-xl border border-border bg-card p-5 shadow-xs lg:p-6">
+          <CardHeader className="flex flex-wrap items-center justify-between gap-3 px-0 pb-4">
             <div>
               <CardTitle>My attendance</CardTitle>
               <CardDescription>

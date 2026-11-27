@@ -154,7 +154,7 @@ export default function ProfilePage() {
       <div className="flex min-h-screen flex-1 items-center justify-center bg-muted/40 px-4">
         <div
           role="alert"
-          className="flex max-w-md items-start gap-2.5 rounded-sm border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
+          className="flex max-w-md items-start gap-2.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
         >
           <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
           <span>{loadError}</span>
@@ -198,7 +198,7 @@ export default function ProfilePage() {
             {detailsMode === "success" && (
               <div
                 role="status"
-                className="mb-4 flex items-start gap-2.5 rounded-sm border border-success-surface/40 bg-success-surface/10 px-3.5 py-3 text-sm text-success"
+                className="mb-4 flex items-start gap-2.5 rounded-lg border border-success-surface/40 bg-success-surface/10 px-3.5 py-3 text-sm text-success"
               >
                 <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                 <span>{detailsMessage}</span>
@@ -207,7 +207,7 @@ export default function ProfilePage() {
             {detailsMode === "error" && (
               <div
                 role="alert"
-                className="mb-4 flex items-start gap-2.5 rounded-sm border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
+                className="mb-4 flex items-start gap-2.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
               >
                 <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                 <span>{detailsMessage}</span>
@@ -289,7 +289,7 @@ export default function ProfilePage() {
             {passwordMode === "success" && (
               <div
                 role="status"
-                className="mb-4 flex items-start gap-2.5 rounded-sm border border-success-surface/40 bg-success-surface/10 px-3.5 py-3 text-sm text-success"
+                className="mb-4 flex items-start gap-2.5 rounded-lg border border-success-surface/40 bg-success-surface/10 px-3.5 py-3 text-sm text-success"
               >
                 <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                 <span>{passwordMessage}</span>
@@ -298,7 +298,7 @@ export default function ProfilePage() {
             {passwordMode === "error" && (
               <div
                 role="alert"
-                className="mb-4 flex items-start gap-2.5 rounded-sm border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
+                className="mb-4 flex items-start gap-2.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
               >
                 <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                 <span>{passwordMessage}</span>

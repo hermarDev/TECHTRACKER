@@ -12,11 +12,12 @@ import {
   Laptop,
   MessageSquare,
 } from "lucide-react";
-import type { Role, TaskAssignmentStatus } from "@prisma/client";
+import type { Role, TaskAssignmentStatus } from "@/lib/types";
 import { computeHoursProgress } from "@/lib/hours";
 import { toast } from "sonner";
 import { AppShell } from "@/components/shell/AppShell";
 import { StatusBadge } from "@/components/shell/StatusBadge";
+import { buttonVariants } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 
 
@@ -58,19 +59,27 @@ function toDate(value: Date | string): Date {
   return value instanceof Date ? value : new Date(value);
 }
 
-function formatDate(date: Date | string): string {
-  return toDate(date).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
+function formatDate(date: Date | string | null | undefined): string {
+  if (!date) return "Not set";
+  const d = toDate(date);
+  return Number.isNaN(d.getTime())
+    ? "Not set"
+    : d.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function formatDateTime(date: Date | string): string {
-  return toDate(date).toLocaleString("en-PH", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+function formatDateTime(date: Date | string | null | undefined): string {
+  if (!date) return "—";
+  const d = toDate(date);
+  return Number.isNaN(d.getTime())
+    ? "—"
+    : d.toLocaleString("en-PH", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
 }
 
 export default function StudentDashboardPage() {
@@ -190,12 +199,14 @@ export default function StudentDashboardPage() {
 
   const allAssignedTasksAccepted =
     taskAssignments.length > 0 && taskAssignments.every((a) => a.status === "ACCEPTED");
+  const unacceptedTasksCount = taskAssignments.filter((a) => a.status !== "ACCEPTED").length;
   const progress = computeHoursProgress({
     logs: attendanceLogs.map((l) => ({ status: l.status, recordedHours: l.recordedHours, creditedHours: l.creditedHours })),
     requiredHours: user.requiredHours ?? 100,
     allAssignedTasksAccepted,
   });
 
+  const hoursRequirementMet = progress.creditedHours >= progress.requiredHours;
   const activeTasks = taskAssignments.filter((a) => OPEN_TASK_STATUSES.includes(a.status as TaskAssignmentStatus));
   const recentAttendance = attendanceLogs.slice(0, 5);
 
@@ -203,82 +214,112 @@ export default function StudentDashboardPage() {
     <AppShell
       user={{ id: user.id, fullName: user.fullName, email: user.email, role: user.role, studentIdNo: user.studentIdNo, section: user.section }}
       unreadNotifications={unread}
-      title="Student Dashboard"
-      subtitle={`100-Hour Pre-OJT Ledger${user.section ? ` — ${user.section}` : ""}`}
+      title="Your Pre-OJT progress"
+      subtitle={`Track attendance, technical tasks and accreditation${user.section ? ` — ${user.section}` : ""}`}
     >
       <div className="grid gap-6">
         {/* 100-Hour Ledger: credited vs pending kept separate */}
-        <section aria-label="100-hour ledger" className="grid gap-4 rounded-sm border border-border bg-card p-4 lg:p-5">
-          <div className="flex items-center gap-2">
-            <GraduationCap className="size-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">100-Hour Pre-OJT Ledger</h2>
+        <section aria-label="100-hour ledger" className="grid gap-5 rounded-xl border border-border bg-card p-5 shadow-xs lg:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <GraduationCap className="size-4 text-primary" aria-hidden="true" />
+              <h2 className="text-base font-semibold">100-Hour Pre-OJT Ledger</h2>
+            </div>
+            {progress.preOjtEligibleForCompletion ? (
+              <span className="inline-flex items-center rounded-full border border-success-surface/35 bg-success-surface/12 px-2.5 py-0.5 text-xs font-medium text-success">
+                Completed
+              </span>
+            ) : hoursRequirementMet && unacceptedTasksCount > 0 ? (
+              <span className="inline-flex items-center rounded-full border border-warning-surface/40 bg-warning-surface/14 px-2.5 py-0.5 text-xs font-medium text-warning">
+                Tasks outstanding
+              </span>
+            ) : (
+              <span className="inline-flex items-center rounded-full border border-border bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                In progress
+              </span>
+            )}
           </div>
-          <p className="text-sm text-muted-foreground">
-            Coordinator-accredited hours are counted toward the requirement; pending punches are shown separately until reviewed.
-          </p>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-sm border border-success-surface/35 bg-success-surface/10 px-3.5 py-3">
-              <p className="text-xs font-medium text-success">Credited (Approved)</p>
-              <p className="mt-1 text-2xl font-semibold tabular-ledger text-success">
-                {progress.creditedHours.toFixed(2)}
-                <span className="ml-1 text-sm font-normal">hrs</span>
-              </p>
-            </div>
-            <div className="rounded-sm border border-warning-surface/40 bg-warning-surface/10 px-3.5 py-3">
-              <p className="text-xs font-medium text-warning">Pending Review</p>
-              <p className="mt-1 text-2xl font-semibold tabular-ledger text-warning">
-                {progress.pendingHours.toFixed(2)}
-                <span className="ml-1 text-sm font-normal">hrs</span>
-              </p>
-            </div>
-            <div className="rounded-sm border border-border bg-muted px-3.5 py-3">
-              <p className="text-xs font-medium text-muted-foreground">Remaining</p>
-              <p className="mt-1 text-2xl font-semibold tabular-ledger">
-                {progress.remainingHours.toFixed(2)}
-                <span className="ml-1 text-sm font-normal">hrs</span>
-              </p>
-            </div>
-            <div className="rounded-sm border border-border bg-muted px-3.5 py-3">
-              <p className="text-xs font-medium text-muted-foreground">Requirement</p>
-              <p className="mt-1 text-2xl font-semibold tabular-ledger">
-                {progress.requiredHours.toFixed(0)}
-                <span className="ml-1 text-sm font-normal">hrs</span>
-              </p>
+
+          <div className="flex flex-wrap items-baseline justify-between gap-4">
+            <p className="font-mono text-4xl font-bold tracking-tight tabular-ledger text-foreground">
+              {progress.creditedHours.toFixed(2)}
+              <span className="ml-2 font-sans text-base font-normal text-muted-foreground">
+                / {progress.requiredHours.toFixed(0)} credited hours
+              </span>
+            </p>
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <span className="rounded-lg border border-success-surface/35 bg-success-surface/10 px-2.5 py-1 font-medium text-success">
+                Credited (Approved): <span className="font-mono tabular-ledger">{progress.creditedHours.toFixed(2)} hrs</span>
+              </span>
+              <span className="rounded-lg border border-warning-surface/40 bg-warning-surface/10 px-2.5 py-1 font-medium text-warning">
+                Pending Review: <span className="font-mono tabular-ledger">{progress.pendingHours.toFixed(2)} hrs</span>
+              </span>
+              <span className="rounded-lg border border-border bg-muted px-2.5 py-1 font-medium text-muted-foreground">
+                Remaining: <span className="font-mono tabular-ledger">{progress.remainingHours.toFixed(2)} hrs</span>
+              </span>
             </div>
           </div>
 
           <div>
-            <Progress value={progress.percentCredited} className="w-full" aria-label="Credited hours toward the 100-hour requirement" />
-            <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-              <span>Credited toward {progress.requiredHours.toFixed(0)}-hour requirement</span>
-              <span className="tabular-ledger font-medium">{progress.percentCredited.toFixed(1)}%</span>
+            <Progress value={progress.percentCredited} className="h-2.5 w-full" aria-label="Credited hours toward the 100-hour requirement" />
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>{progress.percentCredited.toFixed(1)}% hours reached</span>
+              <span>Coordinator-accredited hours are counted separately from pending punches</span>
             </div>
           </div>
 
-          {progress.preOjtEligibleForCompletion ? (
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-muted/40 px-4 py-3.5">
+            <div className="grid gap-1 sm:grid-cols-2 sm:gap-8">
+              <div>
+                <p className="text-xs text-muted-foreground">1. Duty hours requirement</p>
+                <p className={hoursRequirementMet ? "text-sm font-semibold text-success" : "text-sm font-semibold tabular-ledger text-foreground"}>
+                  {hoursRequirementMet
+                    ? "Hours requirement met"
+                    : `${progress.remainingHours.toFixed(2)} hrs remaining`}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">2. Technical tasks acceptance</p>
+                <p className={allAssignedTasksAccepted ? "text-sm font-semibold text-success" : "text-sm font-semibold text-warning"}>
+                  {taskAssignments.length === 0
+                    ? "No tasks assigned yet"
+                    : allAssignedTasksAccepted
+                      ? "All assigned tasks accepted"
+                      : `${unacceptedTasksCount} task${unacceptedTasksCount === 1 ? "" : "s"} not yet accepted`}
+                </p>
+              </div>
+            </div>
+            {progress.preOjtEligibleForCompletion ? (
+              <Link href="/attendance" className={buttonVariants({ variant: "default", size: "sm" })}>
+                Open accreditation log
+              </Link>
+            ) : (
+              <Link href="/tasks" className={buttonVariants({ variant: "default", size: "sm" })}>
+                View tasks
+              </Link>
+            )}
+          </div>
+
+          {progress.preOjtEligibleForCompletion && (
             <p
               role="status"
-              className="flex items-center gap-2 rounded-sm border border-success-surface/40 bg-success-surface/10 px-3.5 py-2.5 text-sm text-success"
+              className="flex items-center gap-2 rounded-lg border border-success-surface/40 bg-success-surface/10 px-3.5 py-2.5 text-sm text-success"
             >
               <BookOpenCheck className="size-4 shrink-0" aria-hidden="true" />
               All requirements met — credited hours reached {progress.requiredHours.toFixed(0)} and every assigned task is accepted. Your coordinator will mark Pre-OJT completion.
             </p>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Pre-OJT completion requires {progress.requiredHours.toFixed(0)} credited hours plus all assigned tasks accepted.
-            </p>
           )}
         </section>
 
-        <section aria-label="Overview actions" className="grid gap-4 lg:grid-cols-2">
+        <section aria-label="Overview actions" className="grid gap-5 lg:grid-cols-2">
           {/* Active tasks summary */}
-          <div className="grid gap-3 rounded-sm border border-border bg-card p-4">
+          <div className="grid gap-3 rounded-xl border border-border bg-card p-5 shadow-xs">
             <div className="flex items-center justify-between gap-2">
               <h2 className="flex items-center gap-2 text-base font-semibold">
                 <ClipboardCheck className="size-4 text-primary" aria-hidden="true" />
                 Active Tasks
               </h2>
-              <Link href="/tasks" className="-mr-2 inline-flex min-h-11 items-center px-2 text-xs font-medium text-primary underline-offset-4 hover:underline">
+              <Link href="/tasks" className="-mr-2 inline-flex min-h-10 items-center px-2 text-xs font-medium text-primary underline-offset-4 hover:underline">
                 View all
               </Link>
             </div>
@@ -305,13 +346,13 @@ export default function StudentDashboardPage() {
           </div>
 
           {/* Recent attendance */}
-          <div className="grid gap-3 rounded-sm border border-border bg-card p-4">
+          <div className="grid gap-3 rounded-xl border border-border bg-card p-5 shadow-xs">
             <div className="flex items-center justify-between gap-2">
               <h2 className="flex items-center gap-2 text-base font-semibold">
                 <CalendarClock className="size-4 text-primary" aria-hidden="true" />
                 Recent Attendance
               </h2>
-              <Link href="/attendance" className="-mr-2 inline-flex min-h-11 items-center px-2 text-xs font-medium text-primary underline-offset-4 hover:underline">
+              <Link href="/attendance" className="-mr-2 inline-flex min-h-10 items-center px-2 text-xs font-medium text-primary underline-offset-4 hover:underline">
                 View all
               </Link>
             </div>
@@ -351,9 +392,9 @@ export default function StudentDashboardPage() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className="group flex min-h-24 flex-col justify-between rounded-sm border border-border bg-card px-4 py-3.5 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                  className="group flex min-h-24 flex-col justify-between rounded-xl border border-border bg-card px-4 py-4 shadow-xs transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
                 >
-                  <span className="flex items-center gap-2 text-sm font-medium">
+                  <span className="flex items-center gap-2 text-sm font-semibold">
                     <Icon className="size-4 text-primary" aria-hidden="true" />
                     {item.label}
                   </span>
@@ -366,6 +407,7 @@ export default function StudentDashboardPage() {
             })}
           </div>
         </section>
-      </div>    </AppShell>
+      </div>
+    </AppShell>
   );
 }

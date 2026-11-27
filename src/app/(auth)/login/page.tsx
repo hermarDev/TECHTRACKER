@@ -1,6 +1,6 @@
 "use client";
 
-import { BrandLogo } from "@/components/shell/BrandLogo";
+import { PublicHeader } from "@/components/shell/PublicHeader";
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -72,62 +72,75 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-1 flex-col items-center justify-center bg-muted/40 px-4 py-10">
-      <div className="w-full max-w-[450px] space-y-6">
-        <div className="text-center">
-          <BrandLogo className="mx-auto size-12" />
-          <h1 className="mt-6 text-2xl font-normal tracking-tight text-foreground">
-            Sign in to TechTracker
-          </h1>
-          <p className="mt-2 text-sm text-muted-foreground">Use your TechTracker account</p>
+    <div className="flex min-h-screen flex-1 flex-col bg-background">
+      <PublicHeader showSignIn={false} />
+      <main className="flex flex-1 flex-col items-center justify-center px-4 py-10">
+        <div className="w-full max-w-[480px] space-y-6">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+              Sign in to TechTracker
+            </h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Use your institutional or registered account.
+            </p>
+          </div>
+
+          <Card className="rounded-xl border-border bg-card shadow-xs">
+            <CardContent className="p-6 sm:p-8">
+              {mode === "error" && (
+                <div
+                  role="alert"
+                  className="mb-5 flex items-start gap-2.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
+                >
+                  <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                  <span>{alertMessage}</span>
+                </div>
+              )}
+              {mode === "success" && (
+                <div
+                  role="status"
+                  className="mb-5 flex items-start gap-2.5 rounded-lg border border-success-surface/40 bg-success-surface/10 px-3.5 py-3 text-sm text-success"
+                >
+                  <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                  <span>{alertMessage}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSubmit} className="space-y-5">
+                <fieldset disabled={!hydrated} className="space-y-5">
+                  <FloatingInput id="email" name="email" type="email" autoComplete="email" required label="Email address" error={emailError} value={email} onChange={(e) => { setEmail(e.target.value); setEmailError(null); }} />
+                  <PasswordInput id="password" name="password" autoComplete="current-password" required label="Password" value={password} onChange={(e) => setPassword(e.target.value)} aria-invalid={mode === "error"} />
+                  <div className="flex justify-end">
+                    <Link href="/forgot-password" className="text-sm font-medium text-primary hover:underline">
+                      Forgot password?
+                    </Link>
+                  </div>
+                  <Button type="submit" className="h-11 w-full text-sm font-semibold" disabled={submitting}>
+                    {submitting ? "Signing in..." : "Sign in"}
+                  </Button>
+                </fieldset>
+              </form>
+            </CardContent>
+          </Card>
+
+          <div className="text-center text-sm">
+            <span className="text-muted-foreground">New to TechTracker? </span>
+            <Link href="/register" className="font-medium text-primary hover:underline">
+              Create student account
+            </Link>
+          </div>
+
+          <div className="flex flex-col items-center gap-2 pt-1 text-xs text-muted-foreground">
+            <p className="flex items-center gap-1.5">
+              <ShieldCheck className="size-4" aria-hidden="true" />
+              Accounts lock for 15 minutes after 5 failed sign-in attempts.
+            </p>
+            <Link href="/" className="hover:text-foreground hover:underline">
+              Back to homepage
+            </Link>
+          </div>
         </div>
-
-        <Card className="border-border bg-card shadow-sm">
-          <CardContent className="pt-6">
-            {mode === "error" && (
-              <div
-                role="alert"
-                className="mb-4 flex items-start gap-2.5 rounded-md border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
-              >
-                <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                <span>{alertMessage}</span>
-              </div>
-            )}
-            {mode === "success" && (
-              <div
-                role="status"
-                className="mb-4 flex items-start gap-2.5 rounded-md border border-success-surface/40 bg-success-surface/10 px-3.5 py-3 text-sm text-success"
-              >
-                <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                <span>{alertMessage}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <fieldset disabled={!hydrated} className="space-y-6">
-              <FloatingInput id="email" name="email" type="email" autoComplete="email" required label="Email address" error={emailError} value={email} onChange={(e) => { setEmail(e.target.value); setEmailError(null); }} />
-              <PasswordInput id="password" name="password" autoComplete="current-password" required label="Password" value={password} onChange={(e) => setPassword(e.target.value)} aria-invalid={mode === "error"} />
-              <div className="flex items-center justify-between gap-4">
-                <Link href="/forgot-password" className="text-sm font-medium text-primary hover:underline">Forgot password?</Link>
-                <Button type="submit" className="min-h-11 px-6" disabled={submitting}>{submitting ? "Signing in..." : "Sign in"}</Button>
-              </div>
-              </fieldset>
-            </form>
-          </CardContent>
-        </Card>
-
-        <div className="text-center text-sm">
-          <span className="text-muted-foreground">New to TechTracker? </span>
-          <Link href="/register" className="font-medium text-primary hover:underline">
-            Create account
-          </Link>
-        </div>
-
-        <p className="flex items-center justify-center gap-1.5 pt-2 text-xs text-muted-foreground">
-          <ShieldCheck className="size-4" aria-hidden="true" />
-          Accounts lock for 15 minutes after 5 failed sign-in attempts.
-        </p>
-      </div>
+      </main>
     </div>
   );
 }

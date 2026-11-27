@@ -13,7 +13,7 @@ import {
   Laptop,
   Layers,
 } from "lucide-react";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/types";
 
 import { AppShell } from "@/components/shell/AppShell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -267,36 +267,36 @@ export default function AdminDashboardPage() {
           </Alert>
         )}
 
-        <section aria-label="Summary metrics" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <section aria-label="Summary metrics" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {cards.map((card) => {
             const Icon = card.icon;
             return (
-              <article key={card.label} className="grid gap-1 rounded-sm border border-border bg-card p-4">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Icon className="size-4" aria-hidden="true" />
+              <article key={card.label} className="grid gap-1.5 rounded-xl border border-border bg-card p-5 shadow-xs">
+                <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                  <Icon className="size-4 text-primary" aria-hidden="true" />
                   {card.label}
                 </div>
-                <p className="text-2xl font-semibold tabular-ledger">{card.value}</p>
+                <p className="font-mono text-3xl font-bold tracking-tight tabular-ledger">{card.value}</p>
                 <p className="text-xs text-muted-foreground">{card.sub}</p>
               </article>
             );
           })}
         </section>
 
-        <section aria-label="Overview actions" className="grid gap-4 lg:grid-cols-2">
-          <div className="grid gap-3 rounded-sm border border-border bg-card p-4">
+        <section aria-label="Overview actions" className="grid gap-5 lg:grid-cols-2">
+          <div className="grid gap-3 rounded-xl border border-border bg-card p-5 shadow-xs">
             <h2 className="text-base font-semibold">Needs attention</h2>
-            <ul className="grid gap-2">
+            <ul className="grid gap-2.5">
               <li>
                 <Link
                   href="/admin/attendance"
-                  className="flex min-h-11 items-center justify-between gap-3 rounded-sm border border-border px-3 py-2 text-sm transition-colors hover:bg-muted"
+                  className="flex min-h-12 items-center justify-between gap-3 rounded-lg border border-border px-3.5 py-2.5 text-sm transition-colors hover:bg-muted"
                 >
                   <span className="flex items-center gap-2">
-                    <CalendarClock className="size-4 text-muted-foreground" aria-hidden="true" />
+                    <CalendarClock className="size-4 text-primary" aria-hidden="true" />
                     Attendance reviews pending
                   </span>
-                  <span className="flex items-center gap-2 font-semibold tabular-ledger">
+                  <span className="flex items-center gap-2 font-mono font-semibold tabular-ledger">
                     {metrics.attendancePending ?? "—"}
                     <span aria-hidden="true">→</span>
                   </span>
@@ -305,13 +305,13 @@ export default function AdminDashboardPage() {
               <li>
                 <Link
                   href="/admin/students"
-                  className="flex min-h-11 items-center justify-between gap-3 rounded-sm border border-border px-3 py-2 text-sm transition-colors hover:bg-muted"
+                  className="flex min-h-12 items-center justify-between gap-3 rounded-lg border border-border px-3.5 py-2.5 text-sm transition-colors hover:bg-muted"
                 >
                   <span className="flex items-center gap-2">
-                    <GraduationCap className="size-4 text-muted-foreground" aria-hidden="true" />
+                    <GraduationCap className="size-4 text-primary" aria-hidden="true" />
                     Student verifications pending
                   </span>
-                  <span className="flex items-center gap-2 font-semibold tabular-ledger">
+                  <span className="flex items-center gap-2 font-mono font-semibold tabular-ledger">
                     {metrics.studentsPending ?? "—"}
                     <span aria-hidden="true">→</span>
                   </span>
@@ -319,18 +319,18 @@ export default function AdminDashboardPage() {
               </li>
             </ul>
           </div>
-          <div className="grid gap-3 rounded-sm border border-border bg-card p-4">
+          <div className="grid gap-3 rounded-xl border border-border bg-card p-5 shadow-xs">
             <h2 className="text-base font-semibold">Quick actions</h2>
-            <ul className="grid gap-2 sm:grid-cols-2">
+            <ul className="grid gap-2.5 sm:grid-cols-2">
               {QUICK_ACTIONS.map((item) => {
                 const Icon = item.icon;
                 return (
                   <li key={item.href}>
                     <Link
                       href={item.href}
-                      className="flex min-h-11 items-center gap-2 rounded-sm border border-border px-3 py-2 text-sm font-medium transition-colors hover:bg-muted"
+                      className="flex min-h-12 items-center gap-2.5 rounded-lg border border-border px-3.5 py-2.5 text-sm font-medium transition-colors hover:bg-muted"
                     >
-                      <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      <Icon className="size-4 shrink-0 text-primary" aria-hidden="true" />
                       <span className="truncate">{item.label}</span>
                     </Link>
                   </li>

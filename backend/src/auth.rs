@@ -19,6 +19,8 @@ pub struct SessionPayload {
     pub role: String,
     #[serde(rename = "batchId")]
     pub batch_id: Option<String>,
+    #[serde(rename = "tv", default)]
+    pub token_version: i32,
 }
 
 pub fn hash_password(plain: &str) -> Result<String, AppError> {
@@ -41,6 +43,8 @@ pub fn sign_session_jwt(config: &Config, payload: &SessionPayload) -> Result<Str
         role: String,
         #[serde(rename = "batchId")]
         batch_id: Option<String>,
+        #[serde(rename = "tv")]
+        token_version: i32,
         iat: usize,
         exp: usize,
     }
@@ -50,6 +54,7 @@ pub fn sign_session_jwt(config: &Config, payload: &SessionPayload) -> Result<Str
         full_name: payload.full_name.clone(),
         role: payload.role.clone(),
         batch_id: payload.batch_id.clone(),
+        token_version: payload.token_version,
         iat: now.timestamp() as usize,
         exp,
     };
@@ -75,27 +80,32 @@ pub fn verify_session_jwt(config: &Config, token: &str) -> Option<SessionPayload
         .get("batchId")
         .and_then(|x| x.as_str())
         .map(|s| s.to_string());
+    let token_version = v.get("tv").and_then(|x| x.as_i64()).unwrap_or(0) as i32;
     Some(SessionPayload {
         sub,
         email,
         full_name,
         role,
         batch_id,
+        token_version,
     })
 }
 
+/// Returns (locked, minutes_remaining, effective_failed_count). An expired
+/// lockout resets the counter so one wrong password cannot immediately re-lock.
 pub fn evaluate_lockout(
-    _failed: i32,
+    failed: i32,
     locked_until: Option<chrono::DateTime<Utc>>,
     now: chrono::DateTime<Utc>,
-) -> (bool, i64) {
+) -> (bool, i64, i32) {
     if let Some(lu) = locked_until {
         if lu > now {
             let mins = ((lu - now).num_seconds() + 59) / 60;
-            return (true, mins);
+            return (true, mins, failed);
         }
+        return (false, 0, 0);
     }
-    (false, 0)
+    (false, 0, failed)
 }
 
 pub fn next_failure(
@@ -124,4 +134,42 @@ pub fn create_opaque_token() -> (String, String) {
 pub fn hash_token(raw: &str) -> String {
     use sha2::{Digest, Sha256};
     hex::encode(Sha256::digest(raw.as_bytes()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expired_lockout_resets_the_failure_counter() {
+        let now = Utc::now();
+        let expired = now - Duration::minutes(1);
+        let (locked, mins, failed) = evaluate_lockout(5, Some(expired), now);
+        assert!(!locked);
+        assert_eq!(mins, 0);
+        assert_eq!(failed, 0);
+        let (next, lock, triggered, remaining) = next_failure(failed, now);
+        assert_eq!(next, 1);
+        assert!(lock.is_none());
+        assert!(!triggered);
+        assert_eq!(remaining, MAX_FAILED_LOGIN_ATTEMPTS - 1);
+    }
+
+    #[test]
+    fn active_lockout_keeps_the_counter_and_reports_minutes() {
+        let now = Utc::now();
+        let (locked, mins, failed) = evaluate_lockout(5, Some(now + Duration::minutes(5)), now);
+        assert!(locked);
+        assert!(mins >= 5);
+        assert_eq!(failed, 5);
+    }
+
+    #[test]
+    fn password_hashing_verifies_and_token_hashing_is_stable() {
+        let hash = hash_password("CorrectHorse1").unwrap();
+        assert!(verify_password("CorrectHorse1", &hash));
+        assert!(!verify_password("WrongHorse1", &hash));
+        let (raw, stored) = create_opaque_token();
+        assert_eq!(hash_token(&raw), stored);
+    }
 }

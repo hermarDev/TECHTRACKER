@@ -3,6 +3,7 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import * as React from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   BellRing,
@@ -24,7 +25,7 @@ import {
   UserCog,
   Users,
 } from "lucide-react";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/types";
 
 import { AppShell } from "@/components/shell/AppShell";
 import { StatusBadge } from "@/components/shell/StatusBadge";
@@ -297,6 +298,11 @@ function AdminsPanel() {
             />
           </span>
           <Select
+            items={[
+              { value: "ALL", label: "All statuses" },
+              { value: "ACTIVE", label: "Active" },
+              { value: "DEACTIVATED", label: "Deactivated" },
+            ]}
             value={statusFilter || "ALL"}
             onValueChange={(value) => {
               setPage(1);
@@ -602,7 +608,7 @@ function ConfigPanel() {
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="config-rounding">Credit rounding rule</Label>
-        <Select value={rounding} onValueChange={(value) => setRounding(value ?? "")}>
+        <Select items={ROUNDING_RULES} value={rounding} onValueChange={(value) => setRounding(value ?? "")}>
           <SelectTrigger id="config-rounding" className="w-full max-w-xs">
             <SelectValue />
           </SelectTrigger>
@@ -724,6 +730,12 @@ function BatchesPanel() {
 // ============================================================================
 
 const RULING_STATUSES = ["OPEN", "APPROVED", "UPHELD", "DISMISSED"] as const;
+const RULING_STATUS_LABELS = {
+  OPEN: "Open cases",
+  APPROVED: "Approved",
+  UPHELD: "Upheld",
+  DISMISSED: "Dismissed",
+} as const;
 
 function EscalationsPanel() {
   const [rows, setRows] = React.useState<EscalationRow[]>([]);
@@ -795,6 +807,7 @@ function EscalationsPanel() {
         </h3>
         <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-xs text-muted-foreground [&>span]:min-w-0 [&>span]:max-w-full [&_input]:min-w-0 [&_input]:max-w-full [&_select]:min-w-0 [&_select]:max-w-full">
           <Select
+            items={RULING_STATUSES.map((status) => ({ value: status, label: RULING_STATUS_LABELS[status] }))}
             value={statusFilter}
             onValueChange={(value) => {
               setPage(1);
@@ -807,12 +820,17 @@ function EscalationsPanel() {
             <SelectContent>
               {RULING_STATUSES.map((s) => (
                 <SelectItem key={s} value={s}>
-                  {s === "OPEN" ? "Open cases" : s === "APPROVED" ? "Approved" : s === "UPHELD" ? "Upheld" : "Dismissed"}
+                  {RULING_STATUS_LABELS[s]}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
           <Select
+            items={[
+              { value: "ALL", label: "All sources" },
+              { value: "ATTENDANCE", label: "Attendance" },
+              { value: "TASK_REVIEW", label: "Task review" },
+            ]}
             value={sourceFilter || "ALL"}
             onValueChange={(value) => {
               setPage(1);
@@ -920,7 +938,7 @@ function EscalationsPanel() {
           </DialogHeader>
           {ruling && (
             <div className="grid gap-3">
-              <div className="grid gap-1 rounded-sm border border-border bg-muted/30 p-3 text-sm">
+              <div className="grid gap-1 rounded-lg border border-border bg-muted/30 p-3 text-sm">
                 <p className="font-medium">{ruling.summary}</p>
                 <p className="text-xs text-muted-foreground">{ruling.policyDetails}</p>
                 <p className="text-xs text-muted-foreground">
@@ -1069,6 +1087,11 @@ function AuditPanel() {
     }
   };
 
+  const entityOptions = entityTypes.map((type) => ({
+    value: type,
+    label: type.toLowerCase().replace(/_/g, " "),
+  }));
+
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1091,6 +1114,7 @@ function AuditPanel() {
             />
           </span>
           <Select
+            items={[{ value: "ALL", label: "All entity types" }, ...entityOptions]}
             value={entityFilter || "ALL"}
             onValueChange={(value) => {
               setPage(1);
@@ -1102,9 +1126,9 @@ function AuditPanel() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">All entity types</SelectItem>
-              {entityTypes.map((type) => (
-                <SelectItem key={type} value={type}>
-                  {type}
+              {entityOptions.map(({ value, label }) => (
+                <SelectItem key={value} value={value}>
+                  {label}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -1345,7 +1369,7 @@ function RoomsPanel() {
         {rooms.map((room) => {
           const counts = conditionCounts(room);
           return (
-            <article key={room.id} className="rounded-sm border border-border bg-card p-4">
+            <article key={room.id} className="rounded-xl border border-border bg-card p-4 shadow-xs">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="font-semibold">{room.name}</p>
@@ -1378,7 +1402,7 @@ function RoomsPanel() {
                 </div>
               </div>
               {room.units.length > 0 && (
-                <div className="mt-3 min-w-0 max-w-full overflow-x-auto rounded-sm border border-border">
+                <div className="mt-3 min-w-0 max-w-full overflow-x-auto rounded-lg border border-border">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -1429,7 +1453,7 @@ function RoomsPanel() {
           );
         })}
         {rooms.length === 0 && (
-          <p className="rounded-sm border border-border bg-card p-6 text-sm text-muted-foreground">
+          <p className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground shadow-xs">
             No lab rooms configured yet.
           </p>
         )}
@@ -1590,6 +1614,11 @@ function RoomsPanel() {
             <div className="grid gap-1.5">
               <Label htmlFor="unit-condition">Condition</Label>
               <Select
+                items={[
+                  { value: "FUNCTIONING", label: "Functioning" },
+                  { value: "NEEDS_MAINTENANCE", label: "Needs Maintenance" },
+                  { value: "NEEDS_REPAIR", label: "Needs Repair" },
+                ]}
                 value={unitDraft.condition}
                 onValueChange={(value) => setUnitDraft((d) => ({ ...d, condition: value ?? "" }))}
               >
@@ -1647,15 +1676,15 @@ function AlertsPanel({ overview }: { overview: Overview | null }) {
         </AlertDescription>
       </Alert>
       <div className="grid gap-3 sm:grid-cols-3">
-        <div className="rounded-sm border border-border bg-card p-4">
+        <div className="rounded-xl border border-border bg-card p-4 shadow-xs">
           <p className="text-xs text-muted-foreground">Unread alert notifications</p>
           <p className="text-2xl font-semibold tabular-ledger">{overview?.unreadNotifications ?? "—"}</p>
         </div>
-        <div className="rounded-sm border border-border bg-card p-4">
+        <div className="rounded-xl border border-border bg-card p-4 shadow-xs">
           <p className="text-xs text-muted-foreground">Open escalations</p>
           <p className="text-2xl font-semibold tabular-ledger">{openEscalations ?? "—"}</p>
         </div>
-        <div className="rounded-sm border border-border bg-card p-4">
+        <div className="rounded-xl border border-border bg-card p-4 shadow-xs">
           <p className="text-xs text-muted-foreground">Inspections on record</p>
           <p className="text-2xl font-semibold tabular-ledger">{overview?.inspectionCount ?? "—"}</p>
         </div>
@@ -1678,12 +1707,16 @@ function AlertsPanel({ overview }: { overview: Overview | null }) {
 // Page shell
 // ============================================================================
 
-export default function SuperAdminPage() {
+function SuperAdminContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [user, setUser] = React.useState<{ id: string; fullName: string; email: string; role: Role } | null>(null);
   const [unread, setUnread] = React.useState(0);
   const [overview, setOverview] = React.useState<Overview | null>(null);
   const [error, setError] = React.useState<string | null>(null);
-  const [tab, setTab] = React.useState<TabValue>("admins");
+
+  const qTab = searchParams.get("tab");
+  const tab: TabValue = qTab && TAB_META.some((t) => t.value === qTab) ? (qTab as TabValue) : "admins";
 
   React.useEffect(() => {
     void (async () => {
@@ -1754,7 +1787,7 @@ export default function SuperAdminPage() {
         )}
 
         {/* Executive summary */}
-        <section aria-label="Executive summary" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <section aria-label="Executive summary" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           {[
             { label: "Coordinators", value: roleCounts("ADMIN"), icon: UserCog },
             { label: "Students", value: roleCounts("STUDENT"), icon: Users },
@@ -1764,18 +1797,24 @@ export default function SuperAdminPage() {
           ].map((card) => {
             const Icon = card.icon;
             return (
-              <article key={card.label} className="grid gap-1 rounded-sm border border-border bg-card p-4">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Icon className="size-4" aria-hidden="true" />
+              <article key={card.label} className="grid gap-1.5 rounded-xl border border-border bg-card p-5 shadow-xs">
+                <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                  <Icon className="size-4 text-primary" aria-hidden="true" />
                   {card.label}
                 </div>
-                <p className="text-2xl font-semibold tabular-ledger">{card.value ?? "—"}</p>
+                <p className="font-mono text-3xl font-bold tracking-tight tabular-ledger">{card.value ?? "—"}</p>
               </article>
             );
           })}
         </section>
 
-        <Tabs value={tab} onValueChange={(value) => setTab(value as TabValue)}>
+        <Tabs
+          value={tab}
+          onValueChange={(value) => {
+            const next = value as TabValue;
+            router.replace(next === "admins" ? "/superadmin" : `/superadmin?tab=${next}`, { scroll: false });
+          }}
+        >
           <TabsList className="flex w-full flex-wrap justify-start">
             {TAB_META.map((meta) => {
               const Icon = meta.icon;
@@ -1789,7 +1828,7 @@ export default function SuperAdminPage() {
           </TabsList>
         </Tabs>
 
-        <section aria-label="Subsystem workspace" className="rounded-sm border border-border bg-card p-4 lg:p-5">
+        <section aria-label="Subsystem workspace" className="rounded-xl border border-border bg-card p-5 shadow-xs lg:p-6">
           {tab === "admins" && <AdminsPanel />}
           {tab === "config" && <ConfigPanel />}
           {tab === "batches" && <BatchesPanel />}
@@ -1800,5 +1839,19 @@ export default function SuperAdminPage() {
         </section>
       </div>
     </AppShell>
+  );
+}
+
+export default function SuperAdminPage() {
+  return (
+    <React.Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center p-8">
+          <p className="text-sm text-muted-foreground">Loading SuperAdmin console…</p>
+        </main>
+      }
+    >
+      <SuperAdminContent />
+    </React.Suspense>
   );
 }

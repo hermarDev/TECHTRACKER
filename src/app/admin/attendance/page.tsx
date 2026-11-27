@@ -1,10 +1,9 @@
-/* Authenticated and local preview images bypass the Next image optimizer. */
-/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import * as React from "react";
 import { StatusBadge } from "@/components/shell/StatusBadge";
 import { AppShell } from "@/components/shell/AppShell";
+import { EvidencePreview } from "@/components/shell/EvidencePreview";
 import { DataTablePagination } from "@/components/shell/DataTablePagination";
 import { toast } from "sonner";
 import { Image as ImageIcon, Edit, AlertTriangle, Loader2, Download, MoreHorizontal } from "lucide-react";
@@ -156,8 +155,8 @@ export default function AdminAttendancePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          timeIn: correctTimeIn,
-          timeOut: correctTimeOut || null,
+          timeIn: new Date(correctTimeIn).toISOString(),
+          timeOut: correctTimeOut ? new Date(correctTimeOut).toISOString() : null,
           correctionReason: correctReason,
         }),
       });
@@ -208,7 +207,7 @@ export default function AdminAttendancePage() {
 
   return (
     <AppShell user={user} title="Attendance Review Queue" subtitle="Review, correct, and escalate duty evidence.">
-      <section className="rounded-sm border border-border bg-card p-4 lg:p-5">
+      <section className="rounded-xl border border-border bg-card p-5 shadow-xs lg:p-6">
         <CardContent className="space-y-4">
           <DataTableToolbar
             search={search}
@@ -216,6 +215,13 @@ export default function AdminAttendancePage() {
             searchPlaceholder="Search by student name or ID"
             filters={
               <Select
+                items={[
+                  { value: "ALL", label: "All statuses" },
+                  { value: "PENDING", label: "Pending" },
+                  { value: "APPROVED", label: "Approved" },
+                  { value: "REJECTED", label: "Rejected" },
+                  { value: "ESCALATED", label: "Escalated" },
+                ]}
                 value={statusFilter || "ALL"}
                 onValueChange={(value) => { setPage(1); setStatusFilter(value === "ALL" ? "" : (value ?? "")); }}
               >
@@ -223,7 +229,7 @@ export default function AdminAttendancePage() {
                   <SelectValue placeholder="All statuses" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="ALL">All</SelectItem>
+                  <SelectItem value="ALL">All statuses</SelectItem>
                   <SelectItem value="PENDING">Pending</SelectItem>
                   <SelectItem value="APPROVED">Approved</SelectItem>
                   <SelectItem value="REJECTED">Rejected</SelectItem>
@@ -308,10 +314,14 @@ export default function AdminAttendancePage() {
                             <DropdownMenuContent align="end">
                               <DropdownMenuItem
                                 onClick={() => {
+                                  const toLocalInput = (iso: string) => {
+                                    const d = new Date(iso);
+                                    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+                                  };
                                   setCorrectDialogOpen(item.id);
                                   setCorrectReasonError("");
-                                  setCorrectTimeIn(new Date(item.timeIn).toISOString().slice(0, 16));
-                                  setCorrectTimeOut(item.timeOut ? new Date(item.timeOut).toISOString().slice(0, 16) : "");
+                                  setCorrectTimeIn(toLocalInput(item.timeIn));
+                                  setCorrectTimeOut(item.timeOut ? toLocalInput(item.timeOut) : "");
                                 }}
                               >
                                 <Edit className="size-4" />
@@ -369,6 +379,29 @@ export default function AdminAttendancePage() {
               </DialogHeader>
               {reviewItem && (
                 <div className="grid gap-4">
+                  <div className="grid gap-3 rounded-lg border border-border bg-muted/40 p-3 sm:grid-cols-3">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Recorded Time In</p>
+                      <p className="font-mono text-xs font-medium tabular-ledger">
+                        {new Date(reviewItem.timeIn).toLocaleString()}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Recorded Time Out</p>
+                      <p className="font-mono text-xs font-medium tabular-ledger">
+                        {reviewItem.timeOut ? new Date(reviewItem.timeOut).toLocaleString() : "Open shift"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Recorded Duration</p>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-semibold tabular-ledger">
+                          {reviewItem.recordedHours.toFixed(2)} hrs
+                        </span>
+                        <StatusBadge status={reviewItem.isIrregular ? "IRREGULAR" : reviewItem.status} />
+                      </div>
+                    </div>
+                  </div>
                   <div className="space-y-2">
                     <Label htmlFor={`remarks-${reviewItem.id}`}>Review remarks</Label>
                     <Textarea
@@ -395,22 +428,20 @@ export default function AdminAttendancePage() {
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
                       <p className="text-sm font-medium">Time-In Photo</p>
-                      <img
-                        src={`/api/files/${reviewItem.photoInKey}`}
-                        alt="Time-In"
-                        className="max-h-[55vh] w-full rounded-sm border object-contain"
+                      <EvidencePreview
+                        fileKey={reviewItem.photoInKey}
+                        alt={`Time-In evidence for ${reviewItem.student.fullName}`}
+                        emptyLabel="No Time-In photo recorded."
                       />
                     </div>
-                    {reviewItem.photoOutKey && (
-                      <div className="space-y-2">
-                        <p className="text-sm font-medium">Time-Out Photo</p>
-                        <img
-                          src={`/api/files/${reviewItem.photoOutKey}`}
-                          alt="Time-Out"
-                          className="max-h-[55vh] w-full rounded-sm border object-contain"
-                        />
-                      </div>
-                    )}
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium">Time-Out Photo</p>
+                      <EvidencePreview
+                        fileKey={reviewItem.photoOutKey}
+                        alt={`Time-Out evidence for ${reviewItem.student.fullName}`}
+                        emptyLabel="No Time-Out photo recorded yet."
+                      />
+                    </div>
                   </div>
                   <DialogFooter>
                     {reviewItem.status === "PENDING" && <>
@@ -433,8 +464,21 @@ export default function AdminAttendancePage() {
                 <DialogDescription>Provide corrected time-in/out and mandatory reason</DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
+                {(() => {
+                  const target = items.find((i) => i.id === correctDialogOpen);
+                  if (!target) return null;
+                  return (
+                    <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs">
+                      <p className="font-medium text-foreground">{target.student.fullName}</p>
+                      <p className="mt-1 font-mono text-muted-foreground tabular-ledger">
+                        Original In: {new Date(target.timeIn).toLocaleString()}
+                        {target.timeOut ? ` · Out: ${new Date(target.timeOut).toLocaleString()}` : ""}
+                      </p>
+                    </div>
+                  );
+                })()}
                 <div className="space-y-2">
-                  <Label htmlFor="correctTimeIn">Time-In</Label>
+                  <Label htmlFor="correctTimeIn">Corrected Time-In</Label>
                   <Input
                     id="correctTimeIn"
                     type="datetime-local"

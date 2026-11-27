@@ -11,7 +11,7 @@ import {
   UploadCloud,
   UserCheck,
 } from "lucide-react";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/types";
 
 import { AppShell } from "@/components/shell/AppShell";
 import { StatusBadge } from "@/components/shell/StatusBadge";
@@ -373,7 +373,7 @@ export default function AdminStudentsPage() {
         )}
 
         {/* 15W — Directory filters */}
-        <section aria-labelledby="directory-heading" className="min-w-0 rounded-sm border border-border bg-card p-4 lg:p-5">
+        <section aria-labelledby="directory-heading" className="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs lg:p-6">
           <div className="grid gap-3">
             <h2 id="directory-heading" className="text-base font-semibold">
               Student directory
@@ -388,6 +388,13 @@ export default function AdminStudentsPage() {
               filters={
                 <>
                   <Select
+                    items={[
+                      { value: "ALL", label: "All statuses" },
+                      { value: "PENDING_VERIFICATION", label: "Pending Verification" },
+                      { value: "ACTIVE", label: "Active" },
+                      { value: "SUSPENDED", label: "Suspended" },
+                      { value: "DEACTIVATED", label: "Deactivated" },
+                    ]}
                     value={statusFilter || "ALL"}
                     onValueChange={(value) => {
                       setPage(1);
@@ -413,7 +420,7 @@ export default function AdminStudentsPage() {
                       setSectionFilter(e.target.value);
                     }}
                     placeholder="Filter section..."
-                    className="h-9 rounded-sm border border-input bg-background px-2.5 text-sm"
+                    className="h-9 rounded-lg border border-input bg-background px-2.5 text-sm"
                   />
                 </>
               }
@@ -543,7 +550,7 @@ export default function AdminStudentsPage() {
 
           {wizardStep === 1 && (
             <div className="grid gap-3">
-              <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center gap-2 rounded-sm border border-dashed border-border bg-muted/30 p-6 text-center hover:bg-muted/60">
+              <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/30 p-6 text-center hover:bg-muted/60">
                 <UploadCloud className="size-6 text-muted-foreground" aria-hidden="true" />
                 <span className="text-sm font-medium">
                   {wizardFile ? wizardFile.name : "Choose roster file (CSV or XLSX)"}
@@ -579,7 +586,7 @@ export default function AdminStudentsPage() {
                   required fields
                 </span>
               </p>
-              <div className="max-h-64 overflow-auto rounded-sm border border-border">
+              <div className="max-h-64 overflow-auto rounded-lg border border-border">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -620,7 +627,7 @@ export default function AdminStudentsPage() {
                 {RESOLUTION_OPTIONS.map((option) => (
                   <label
                     key={option.value}
-                    className={`flex min-h-11 items-start gap-3 rounded-sm border p-3 text-sm ${
+                    className={`flex min-h-11 items-start gap-3 rounded-lg border p-3 text-sm ${
                       importDraft.values.duplicateResolution === option.value
                         ? "border-primary/40 bg-primary/5"
                         : "border-border"
@@ -646,13 +653,26 @@ export default function AdminStudentsPage() {
                   Assign imported students to batch (optional)
                 </label>
                 <Select
+                  items={[
+                    { value: "NONE", label: "No batch assignment" },
+                    ...batches.map((batch) => ({
+                      value: batch.id,
+                      label: `${batch.name} (${batch.section})`,
+                    })),
+                  ]}
                   value={importDraft.values.batchId || "NONE"}
                   onValueChange={(value) =>
                     importDraft.setValues({ batchId: value === "NONE" ? "" : (value ?? "") })
                   }
                 >
                   <SelectTrigger id="import-batch" className="w-full">
-                    <SelectValue placeholder="No batch assignment" />
+                    <SelectValue placeholder="No batch assignment">
+                      {(value: string | null) => {
+                        if (value === "NONE") return "No batch assignment";
+                        const batch = batches.find((item) => item.id === value);
+                        return batch ? `${batch.name} (${batch.section})` : "Batch unavailable";
+                      }}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="NONE">No batch assignment</SelectItem>
@@ -671,7 +691,7 @@ export default function AdminStudentsPage() {
           )}
 
           {wizardStep === 4 && !importResult && (
-            <div className="grid gap-2 rounded-sm border border-border bg-muted/30 p-4 text-sm">
+            <div className="grid gap-2 rounded-lg border border-border bg-muted/30 p-4 text-sm">
               <p>
                 <span className="text-muted-foreground">File:</span> {wizardFile?.name ?? "—"}{" "}
                 {wizardFile && (
@@ -705,7 +725,7 @@ export default function AdminStudentsPage() {
                     ["Errors", importResult.summary.errors],
                   ] as const
                 ).map(([label, value]) => (
-                  <div key={label} className="rounded-sm border border-border bg-card p-3 text-center">
+                  <div key={label} className="rounded-lg border border-border bg-card p-3 text-center">
                     <p className="text-lg font-semibold tabular-ledger">{value}</p>
                     <p className="text-xs text-muted-foreground">{label}</p>
                   </div>

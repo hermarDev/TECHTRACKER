@@ -66,7 +66,6 @@ pub async fn queue_email_outbox(
     Ok(())
 }
 
-#[allow(dead_code)]
 pub async fn queue_email_outbox_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     to_email: &str,

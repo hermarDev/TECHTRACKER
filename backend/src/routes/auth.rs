@@ -1,4 +1,6 @@
-use crate::audit::{queue_email_outbox, write_audit_log};
+use crate::audit::{
+    queue_email_outbox, queue_email_outbox_tx, write_audit_log, write_audit_log_tx,
+};
 use crate::auth::{
     create_opaque_token, hash_password, hash_token, next_failure, sign_session_jwt,
     verify_password, SessionPayload, SESSION_MAX_AGE_SECONDS,
@@ -9,7 +11,7 @@ use crate::state::AppState;
 use crate::validation::{ForgotPasswordInput, LoginInput, RegisterInput};
 use axum::extract::{Query, State};
 use axum::http::header::SET_COOKIE;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -17,8 +19,20 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::Row;
+use std::time::Duration;
 use uuid::Uuid;
 use validator::Validate;
+
+fn client_ip(headers: &HeaderMap) -> String {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .or_else(|| headers.get("x-real-ip").and_then(|v| v.to_str().ok()))
+        .unwrap_or("local")
+        .trim()
+        .to_string()
+}
 
 fn cookie_str(token: &str, max_age: i64, secure: bool) -> String {
     format!(
@@ -54,6 +68,11 @@ async fn register(
     input
         .validate()
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    if let Some(cp) = &input.confirm_password {
+        if cp != &input.password {
+            return Err(AppError::BadRequest("Passwords do not match".into()));
+        }
+    }
 
     // system config
     let allow =
@@ -91,20 +110,21 @@ async fn register(
     let (raw_tok, hash_tok) = create_opaque_token();
     let pw_hash = hash_password(&input.password)?;
     let user_id = Uuid::new_v4().to_string();
+    let mut tx = state.db.begin().await?;
     sqlx::query(
         "INSERT INTO \"User\" (id, email, \"passwordHash\", \"fullName\", role, status, \"studentIdNo\", program, section, \"verificationToken\", \"verificationSentAt\", \"createdAt\", \"updatedAt\", \"requiredHours\", \"preOjtCompleted\", \"failedLoginCount\") VALUES ($1,$2,$3,$4,'STUDENT','PENDING_VERIFICATION',$5,$6,$7,$8,NOW(),NOW(),NOW(),100,false,0)"
     )
     .bind(&user_id).bind(&email).bind(&pw_hash).bind(&input.full_name)
     .bind(&input.student_id_no).bind(&input.program).bind(&input.section).bind(&hash_tok)
-    .execute(&state.db).await?;
+    .execute(&mut *tx).await?;
 
     let verify_url = format!(
         "{}/api/auth/verify?token={}",
         state.config.app_url.trim_end_matches('/'),
         raw_tok
     );
-    queue_email_outbox(
-        &state,
+    queue_email_outbox_tx(
+        &mut tx,
         &email,
         "TechTracker — Verify Your Student Account",
         "VERIFICATION",
@@ -112,8 +132,8 @@ async fn register(
     )
     .await?;
 
-    write_audit_log(
-        &state,
+    write_audit_log_tx(
+        &mut tx,
         Some(&user_id),
         "AUTH_REGISTER",
         "User",
@@ -121,6 +141,7 @@ async fn register(
         json!({"email": email, "studentIdNo": input.student_id_no}),
     )
     .await?;
+    tx.commit().await?;
 
     let resp = json!({
         "user": {"id": user_id, "email": email, "fullName": input.full_name, "role": "STUDENT", "status": "PENDING_VERIFICATION"},
@@ -133,7 +154,7 @@ async fn verify_get(State(state): State<AppState>, Query(q): Query<VerifyQuery>)
     let token = match q.token {
         Some(t) if !t.is_empty() => t,
         _ => {
-            return Redirect::to(&format!(
+            return Redirect::temporary(&format!(
                 "{}/login?verified=invalid",
                 state.config.app_url.trim_end_matches('/')
             ))
@@ -141,13 +162,13 @@ async fn verify_get(State(state): State<AppState>, Query(q): Query<VerifyQuery>)
         }
     };
     if consume_token(&state, &token).await.is_err() {
-        return Redirect::to(&format!(
+        return Redirect::temporary(&format!(
             "{}/login?verified=invalid",
             state.config.app_url.trim_end_matches('/')
         ))
         .into_response();
     }
-    Redirect::to(&format!(
+    Redirect::temporary(&format!(
         "{}/login?verified=1",
         state.config.app_url.trim_end_matches('/')
     ))
@@ -202,7 +223,11 @@ async fn consume_token(state: &AppState, raw: &str) -> Result<String> {
     Ok(id)
 }
 
-async fn login(State(state): State<AppState>, Json(body): Json<serde_json::Value>) -> Response {
+async fn login(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
     let input: LoginInput = match serde_json::from_value(body) {
         Ok(v) => v,
         Err(_) => {
@@ -221,8 +246,9 @@ async fn login(State(state): State<AppState>, Json(body): Json<serde_json::Value
             .into_response();
     }
     let email = input.email.to_lowercase();
+    let limit_key = format!("login:{}:{}", client_ip(&headers), email);
 
-    let row = match sqlx::query("SELECT id,email,\"passwordHash\",\"fullName\",role::text,status::text,\"batchId\",\"failedLoginCount\",\"lockedUntil\"::timestamptz FROM \"User\" WHERE email=$1")
+    let row = match sqlx::query("SELECT id,email,\"passwordHash\",\"fullName\",role::text,status::text,\"batchId\",\"failedLoginCount\",\"lockedUntil\"::timestamptz,\"tokenVersion\" FROM \"User\" WHERE email=$1")
         .bind(&email).fetch_optional(&state.db).await {
         Ok(r) => r,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
@@ -230,11 +256,21 @@ async fn login(State(state): State<AppState>, Json(body): Json<serde_json::Value
     let row = match row {
         Some(r) => r,
         None => {
+            if !state
+                .rate_limiter
+                .allow(&limit_key, 20, Duration::from_secs(60))
+            {
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    Json(json!({"error": "Too many sign-in attempts. Try again shortly."})),
+                )
+                    .into_response();
+            }
             return (
                 StatusCode::UNAUTHORIZED,
                 Json(json!({"error": "Invalid email or password."})),
             )
-                .into_response()
+                .into_response();
         }
     };
 
@@ -246,14 +282,25 @@ async fn login(State(state): State<AppState>, Json(body): Json<serde_json::Value
     let batch_id: Option<String> = row.try_get("batchId").ok();
     let failed: i32 = row.try_get("failedLoginCount").unwrap_or(0);
     let locked_until: Option<chrono::DateTime<Utc>> = row.try_get("lockedUntil").ok();
-
-    let (is_locked, mins) = crate::auth::evaluate_lockout(failed, locked_until, Utc::now());
-    if is_locked {
-        return (StatusCode::LOCKED, Json(json!({"error": format!("Account is locked due to too many failed sign-in attempts. Try again in {} minute(s).", mins), "remainingMinutes": mins}))).into_response();
-    }
+    let token_version: i32 = row.try_get("tokenVersion").unwrap_or(0);
 
     if !verify_password(&input.password, &pw_hash) {
-        let (nfc, nlu, triggered, remaining) = next_failure(failed, Utc::now());
+        let (is_locked, mins, effective_failed) =
+            crate::auth::evaluate_lockout(failed, locked_until, Utc::now());
+        if is_locked {
+            return (StatusCode::LOCKED, Json(json!({"error": format!("Account is locked due to too many failed sign-in attempts. Try again in {} minute(s).", mins), "remainingMinutes": mins}))).into_response();
+        }
+        if !state
+            .rate_limiter
+            .allow(&limit_key, 20, Duration::from_secs(60))
+        {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(json!({"error": "Too many sign-in attempts. Try again shortly."})),
+            )
+                .into_response();
+        }
+        let (nfc, nlu, triggered, remaining) = next_failure(effective_failed, Utc::now());
         let _ = sqlx::query(
             "UPDATE \"User\" SET \"failedLoginCount\"=$1, \"lockedUntil\"=$2 WHERE id=$3",
         )
@@ -280,13 +327,18 @@ async fn login(State(state): State<AppState>, Json(body): Json<serde_json::Value
                 json!({"email": email, "failedLoginCount": nfc}),
             )
             .await;
-            return (StatusCode::LOCKED, Json(json!({"error": "Account is locked due to 5 consecutive failed sign-in attempts. A security alert has been logged. Try again in 15 minutes.", "remainingMinutes": 15}))).into_response();
+            return (StatusCode::LOCKED, Json(json!({"error": "Account is locked due to 5 consecutive failed sign-in attempts. A security alert has been logged. Try again in 15 minutes.", "remainingMinutes": 15, "remainingAttempts": 0}))).into_response();
         }
         return (StatusCode::UNAUTHORIZED, Json(json!({"error": format!("Invalid email or password. {} attempt(s) remaining before a 15-minute lockout.", remaining), "remainingAttempts": remaining}))).into_response();
     }
 
+    let (is_locked, mins, _) = crate::auth::evaluate_lockout(failed, locked_until, Utc::now());
+    if is_locked {
+        return (StatusCode::LOCKED, Json(json!({"error": format!("Account is locked due to too many failed sign-in attempts. Try again in {} minute(s).", mins), "remainingMinutes": mins}))).into_response();
+    }
+
     if status == "PENDING_VERIFICATION" {
-        return (StatusCode::FORBIDDEN, Json(json!({"error": "Verify your email address first. Check your inbox (or the local dev outbox at /dev/outbox) for the verification link."}))).into_response();
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "Verify your email address first. Check your inbox for the verification link."}))).into_response();
     }
     if status != "ACTIVE" {
         return (StatusCode::FORBIDDEN, Json(json!({"error": "This account is suspended or deactivated. Contact your Pre-OJT coordinator."}))).into_response();
@@ -306,6 +358,7 @@ async fn login(State(state): State<AppState>, Json(body): Json<serde_json::Value
             full_name: full_name.clone(),
             role: role.clone(),
             batch_id: batch_id.clone(),
+            token_version,
         },
     ) {
         Ok(t) => t,
@@ -342,7 +395,13 @@ async fn login(State(state): State<AppState>, Json(body): Json<serde_json::Value
     response
 }
 
-async fn logout() -> Response {
+async fn logout(State(state): State<AppState>, auth: Option<AuthUser>) -> Response {
+    if let Some(auth) = auth {
+        let _ = sqlx::query("UPDATE \"User\" SET \"tokenVersion\"=\"tokenVersion\"+1 WHERE id=$1")
+            .bind(&auth.0.sub)
+            .execute(&state.db)
+            .await;
+    }
     let cookie = "techtracker_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT".to_string();
     let mut response = (
         StatusCode::OK,
@@ -357,6 +416,7 @@ async fn logout() -> Response {
 
 async fn forgot_password(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Response> {
     let input: ForgotPasswordInput = serde_json::from_value(body)
@@ -365,6 +425,15 @@ async fn forgot_password(
         .validate()
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     let email = input.email.to_lowercase();
+    let limit_key = format!("forgot:{}:{}", client_ip(&headers), email);
+    if !state
+        .rate_limiter
+        .allow(&limit_key, 20, Duration::from_secs(60))
+    {
+        return Err(AppError::BadRequest(
+            "Too many password reset requests. Try again shortly.".into(),
+        ));
+    }
 
     let generic = "If an account exists for this email address, a password reset link has been sent. The link expires in 1 hour.";
 
@@ -395,7 +464,10 @@ async fn forgot_password(
             &email,
             "TechTracker — Reset Your Password",
             "PASSWORD_RESET",
-            &format!("Hello {},\n\nReset: {}\n", full_name, reset_url),
+            &format!(
+                "Hello {},\n\nReset your password (valid for 1 hour): {}\n",
+                full_name, reset_url
+            ),
         )
         .await?;
     }
@@ -416,7 +488,7 @@ async fn reset_password(
     }
     let b: B = serde_json::from_value(body)
         .map_err(|_| AppError::BadRequest("Invalid reset details".into()))?;
-    if b.password.len() < 8 {
+    if b.password.len() < 8 || b.password.len() > 128 {
         return Err(AppError::BadRequest(
             "Password must be at least 8 characters".into(),
         ));
@@ -458,7 +530,7 @@ async fn reset_password(
     }
 
     let pw_hash = hash_password(&b.password)?;
-    sqlx::query("UPDATE \"User\" SET \"passwordHash\"=$1, \"failedLoginCount\"=0, \"lockedUntil\"=NULL, \"updatedAt\"=NOW() WHERE id=$2")
+    sqlx::query("UPDATE \"User\" SET \"passwordHash\"=$1, \"failedLoginCount\"=0, \"lockedUntil\"=NULL, \"tokenVersion\"=\"tokenVersion\"+1, \"updatedAt\"=NOW() WHERE id=$2")
         .bind(&pw_hash).bind(&user_id).execute(&state.db).await?;
 
     write_audit_log(
@@ -475,13 +547,16 @@ async fn reset_password(
 }
 
 async fn me(State(state): State<AppState>, auth: AuthUser) -> Result<Response> {
-    let row = sqlx::query("SELECT \"preOjtCompleted\" FROM \"User\" WHERE id=$1")
+    let row = sqlx::query("SELECT \"requiredHours\" FROM \"User\" WHERE id=$1")
         .bind(&auth.0.sub)
         .fetch_optional(&state.db)
         .await?;
-    let pre = row
-        .and_then(|r| r.try_get::<bool, _>("preOjtCompleted").ok())
-        .unwrap_or(false);
+    let required_hours: f64 = row
+        .and_then(|r| r.try_get::<f64, _>("requiredHours").ok())
+        .unwrap_or(100.0);
+    let pre =
+        crate::routes::attendance::is_pre_ojt_completed(&state.db, &auth.0.sub, required_hours)
+            .await?;
     let resp = json!({
         "user": {
             "id": auth.0.sub,

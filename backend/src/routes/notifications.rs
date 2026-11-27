@@ -8,7 +8,7 @@ use axum::{Json, Router};
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::json;
-use sqlx::Row;
+use sqlx::{QueryBuilder, Row};
 
 #[derive(Deserialize, Default)]
 struct NotifQuery {
@@ -42,25 +42,31 @@ async fn list(
     }
     let skip = (page - 1) * ps;
     let unread_only = q.unread_only.unwrap_or(false);
-    let filter = if unread_only {
-        " AND \"isRead\"=false"
-    } else {
-        ""
-    };
-    let rows = sqlx::query(&format!(
-        "SELECT id,\"userId\",type::text,title,body,link,\"isRead\",\"createdAt\"::timestamptz FROM \"Notification\" WHERE \"userId\"=$1{} ORDER BY \"createdAt\"::timestamptz DESC LIMIT $2 OFFSET $3",
-        filter
-    ))
-    .bind(&auth.0.sub).bind(ps).bind(skip).fetch_all(&state.db).await?;
-    let total: i64 = sqlx::query(&format!(
-        "SELECT COUNT(*) as c FROM \"Notification\" WHERE \"userId\"=$1{}",
-        filter
-    ))
-    .bind(&auth.0.sub)
-    .fetch_one(&state.db)
-    .await?
-    .try_get("c")
-    .unwrap_or(0);
+    let mut rows_query = QueryBuilder::new(
+        "SELECT id,\"userId\",type::text,title,body,link,\"isRead\",\"createdAt\"::timestamptz FROM \"Notification\" WHERE \"userId\"=",
+    );
+    rows_query.push_bind(&auth.0.sub);
+    let mut count_query =
+        QueryBuilder::new("SELECT COUNT(*) as c FROM \"Notification\" WHERE \"userId\"=");
+    count_query.push_bind(&auth.0.sub);
+    if unread_only {
+        rows_query.push(" AND \"isRead\"=false");
+        count_query.push(" AND \"isRead\"=false");
+    }
+    let rows = rows_query
+        .push(" ORDER BY \"createdAt\" DESC LIMIT ")
+        .push_bind(ps)
+        .push(" OFFSET ")
+        .push_bind(skip)
+        .build()
+        .fetch_all(&state.db)
+        .await?;
+    let total: i64 = count_query
+        .build()
+        .fetch_one(&state.db)
+        .await?
+        .try_get("c")
+        .unwrap_or(0);
     let unread: i64 = sqlx::query(
         "SELECT COUNT(*) as c FROM \"Notification\" WHERE \"userId\"=$1 AND \"isRead\"=false",
     )
@@ -116,28 +122,26 @@ async fn mark_read(
     if target_ids.is_empty() {
         return Err(AppError::BadRequest("No notification ids provided".into()));
     }
-    // build IN clause safely
-    let placeholders: Vec<String> = (1..=target_ids.len())
-        .map(|i| format!("${}", i + 1))
-        .collect();
-    let sql = format!(
-        "UPDATE \"Notification\" SET \"isRead\"=true WHERE id IN ({}) AND \"userId\"=$1",
-        placeholders.join(",")
-    );
-    let mut q = sqlx::query(&sql).bind(&auth.0.sub);
-    for id in &target_ids {
-        q = q.bind(id);
+    let mut q = QueryBuilder::new("UPDATE \"Notification\" SET \"isRead\"=true WHERE id IN (");
+    {
+        let mut separated = q.separated(", ");
+        for id in &target_ids {
+            separated.push_bind(id);
+        }
+        separated.push_unseparated(") AND \"userId\"=");
     }
-    let res = q.execute(&state.db).await?;
+    q.push_bind(&auth.0.sub);
+    let res = q.build().execute(&state.db).await?;
+    let marked = res.rows_affected();
     write_audit_log(
         &state,
         Some(&auth.0.sub),
         "NOTIFICATIONS_MARK_READ",
         "Notification",
         "multiple",
-        json!({"count": target_ids.len()}),
+        json!({"count": marked}),
     )
     .await
     .ok();
-    Ok(Json(json!({"markedRead": res.rows_affected()})))
+    Ok(Json(json!({"markedRead": marked})))
 }

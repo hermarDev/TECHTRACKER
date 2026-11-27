@@ -3,7 +3,7 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { CheckCircle2, CircleAlert, Layers, Pencil, PowerOff, Users } from "lucide-react";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/types";
 
 import { AppShell } from "@/components/shell/AppShell";
 import { StatusBadge } from "@/components/shell/StatusBadge";
@@ -367,7 +367,7 @@ export default function AdminBatchesPage() {
           </Alert>
         )}
 
-        <section aria-label="Batch list" className="rounded-sm border border-border bg-card p-4 lg:p-5">
+        <section aria-label="Batch list" className="rounded-xl border border-border bg-card p-5 shadow-xs lg:p-6">
           <DataTableToolbar
             search={search}
             onSearchChange={(value) => {
@@ -624,7 +624,7 @@ export default function AdminBatchesPage() {
           )}
 
           {wizardStep === 4 && (
-            <div className="grid gap-2 rounded-sm border border-border bg-muted/30 p-4 text-sm">
+            <div className="grid gap-2 rounded-lg border border-border bg-muted/30 p-4 text-sm">
               <p>
                 <span className="text-muted-foreground">Batch:</span> {wizard.values.name.trim()} ·{" "}
                 {wizard.values.section.trim()} · {wizard.values.academicYear.trim()} ·{" "}

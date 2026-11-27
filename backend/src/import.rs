@@ -255,6 +255,24 @@ pub async fn students_import(
                 }
                 "overwrite" => {
                     let eid = _eid;
+                    let target = sqlx::query(
+                        "SELECT u.role::text AS role, b.\"coordinatorId\" AS coord FROM \"User\" u LEFT JOIN \"Batch\" b ON b.id=u.\"batchId\" WHERE u.id=$1",
+                    )
+                    .bind(&eid)
+                    .fetch_one(&mut *tx)
+                    .await?;
+                    let role: String = target.try_get("role")?;
+                    let coord: Option<String> = target.try_get("coord").unwrap_or(None);
+                    if auth.0.role == "ADMIN"
+                        && (role != "STUDENT"
+                            || (coord.is_some() && coord.as_deref() != Some(auth.0.sub.as_str())))
+                    {
+                        errors.push(RowError {
+                            row: row.clone(),
+                            message: "Student belongs to another coordinator".into(),
+                        });
+                        continue;
+                    }
                     if let Some(bid) = &batch_id {
                         sqlx::query(
                             "UPDATE \"User\" SET \"fullName\"=$1, program=$2, section=$3, \"batchId\"=$4, \"updatedAt\"=NOW() WHERE id=$5",

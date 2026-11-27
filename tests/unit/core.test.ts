@@ -2,14 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateLockoutState,
   hashPassword,
+  isResetTokenExpired,
   nextFailureState,
-  signSessionJwt,
+  RESET_TOKEN_TTL_MS,
   verifyPassword,
-  verifySessionJwt,
-} from "@/lib/auth";
-import { canInspectRoom, canUseMessaging, roleDashboardPath } from "@/lib/rbac";
-import { MAX_UPLOAD_BYTES, resolveSafeStoragePath, validateUploadFile } from "@/lib/storage";
+} from "@/lib/auth-helpers";
+import { canInspectRoom, canUseMessaging, roleDashboardPath } from "@/lib/rbac-policies";
+import { MAX_UPLOAD_BYTES, resolveSafeStoragePath, validateUploadFile } from "@/lib/storage-rules";
 import { calculateSessionHours, computeHoursProgress, evaluateScheduleWindow } from "@/lib/hours";
+import { formatSafeDate, formatSafeDateTime, normalizeTaskAttachments } from "@/lib/task-format";
 import { normalizePagination, registerSchema } from "@/lib/validation";
 
 describe("Core Authentication & Lockout (03S)", () => {
@@ -33,20 +34,20 @@ describe("Core Authentication & Lockout (03S)", () => {
     const lockCheck = evaluateLockoutState(step5.failedLoginCount, step5.lockedUntil, now);
     expect(lockCheck.isLocked).toBe(true);
     expect(lockCheck.remainingMinutes).toBe(15);
+
+    const expiredLock = evaluateLockoutState(5, new Date(now.getTime() - 1), now);
+    expect(expiredLock).toEqual({ isLocked: false, remainingMinutes: 0 });
   });
 
-  it("signs and verifies JWT session payloads", async () => {
-    const token = await signSessionJwt({
-      sub: "user-1",
-      email: "student@aclc.edu.ph",
-      fullName: "Test Student",
-      role: "STUDENT",
-      batchId: "batch-1",
-    });
-    const decoded = await verifySessionJwt(token);
-    expect(decoded?.sub).toBe("user-1");
-    expect(decoded?.role).toBe("STUDENT");
+  it("enforces a one-hour password reset lifetime and expires at the exact boundary", () => {
+    const now = new Date("2026-11-15T10:00:00Z");
+    const expiresAt = new Date(now.getTime() + RESET_TOKEN_TTL_MS);
+    expect(RESET_TOKEN_TTL_MS).toBe(60 * 60 * 1000);
+    expect(isResetTokenExpired(expiresAt, new Date(now.getTime() + RESET_TOKEN_TTL_MS - 1))).toBe(false);
+    expect(isResetTokenExpired(expiresAt, new Date(now.getTime() + RESET_TOKEN_TTL_MS))).toBe(true);
+    expect(isResetTokenExpired(new Date(now.getTime() - 1), now)).toBe(true);
   });
+
 });
 
 describe("RBAC & Charter Delimitations (04S, 09S, 11W)", () => {
@@ -146,5 +147,32 @@ describe("Validation & Server Pagination (Charter 56, 02S)", () => {
       confirmPassword: "Password123",
     });
     expect(valid.success).toBe(true);
+  });
+});
+
+describe("Task Attachment Normalization & Safe Date Formatting", () => {
+  it("normalizes both string keys and object attachment records without crashing", () => {
+    const normalized = normalizeTaskAttachments([
+      "tasks/abc.png",
+      { key: "tasks/seed-cabling.png", name: "rack-b-test.png", mime: "image/png", size: 96 },
+      { key: "tasks/report.pdf", name: "Summary.pdf", mime: "application/pdf" },
+      { invalid: true },
+      null,
+    ]);
+    expect(normalized).toEqual([
+      { key: "tasks/abc.png", name: "abc.png", isImage: true },
+      { key: "tasks/seed-cabling.png", name: "rack-b-test.png", isImage: true },
+      { key: "tasks/report.pdf", name: "Summary.pdf", isImage: false },
+    ]);
+  });
+
+  it("formats valid timestamps and falls back cleanly on empty or invalid dates", () => {
+    expect(formatSafeDate("")).toBe("Not set");
+    expect(formatSafeDate(null)).toBe("Not set");
+    expect(formatSafeDate("not-a-date")).toBe("Not set");
+    expect(formatSafeDate("2026-11-22T17:00:00.000Z")).not.toBe("Invalid Date");
+    expect(formatSafeDateTime("")).toBe("—");
+    expect(formatSafeDateTime("bad-date")).toBe("—");
+    expect(formatSafeDateTime("2026-11-22T17:00:00.000Z")).not.toBe("Invalid Date");
   });
 });

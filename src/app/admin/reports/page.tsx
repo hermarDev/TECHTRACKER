@@ -3,13 +3,14 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { CircleAlert, FileDown, FileText, Filter } from "lucide-react";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/types";
 
 import { AppShell } from "@/components/shell/AppShell";
 import { DataTablePagination } from "@/components/shell/DataTablePagination";
-import { FloatingInput } from "@/components/shell/FloatingInput";
+import { StatusBadge } from "@/components/shell/StatusBadge";
 import { useDraftForm } from "@/hooks/useDraftForm";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -61,6 +62,7 @@ export default function AdminReportsPage() {
   const [user, setUser] = React.useState<{ id: string; fullName: string; email: string; role: Role } | null>(null);
   const [unread, setUnread] = React.useState(0);
   const [batches, setBatches] = React.useState<AdminBatch[]>([]);
+  const [batchesLoaded, setBatchesLoaded] = React.useState(false);
   const [rows, setRows] = React.useState<ReportRow[]>([]);
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(15);
@@ -71,6 +73,15 @@ export default function AdminReportsPage() {
     "techtracker-report-filters",
     { type: "attendance", batchId: "", section: "", dateFrom: "", dateTo: "" },
   );
+  const [appliedFilters, setAppliedFilters] = React.useState(filters.values);
+  const [isGenerating, setIsGenerating] = React.useState(false);
+
+  const isStale =
+    filters.values.type !== appliedFilters.type ||
+    filters.values.batchId !== appliedFilters.batchId ||
+    filters.values.section !== appliedFilters.section ||
+    filters.values.dateFrom !== appliedFilters.dateFrom ||
+    filters.values.dateTo !== appliedFilters.dateTo;
 
   React.useEffect(() => {
     void (async () => {
@@ -96,7 +107,9 @@ export default function AdminReportsPage() {
           const batchBody = (await batchRes.json()) as { data: AdminBatch[] };
           setBatches(batchBody.data);
         }
+        setBatchesLoaded(true);
       } catch {
+        setBatchesLoaded(true);
         setError("TechTracker could not reach the server. Check your connection and retry.");
       }
     })();
@@ -109,38 +122,51 @@ export default function AdminReportsPage() {
       targetSize: number,
     ) => {
       setError(null);
-      const query = buildQuery(currentFilters, {
-        page: String(targetPage),
-        pageSize: String(targetSize),
-      });
-      const res = await fetch(`/api/admin/reports?${query}`);
-      if (!res.ok) {
-        toast.error("The report could not be generated.");
-        return;
+      setIsGenerating(true);
+      try {
+        const query = buildQuery(currentFilters, {
+          page: String(targetPage),
+          pageSize: String(targetSize),
+        });
+        const res = await fetch(`/api/admin/reports?${query}`);
+        if (!res.ok) {
+          toast.error("The report could not be generated.");
+          return;
+        }
+        const body = (await res.json()) as {
+          data: ReportRow[];
+          page: number;
+          pageSize: number;
+          total: number;
+        };
+        setAppliedFilters({ ...currentFilters });
+        setRows(body.data);
+        setPage(body.page);
+        setPageSize(body.pageSize);
+        setTotal(body.total);
+      } finally {
+        setIsGenerating(false);
       }
-      const body = (await res.json()) as {
-        data: ReportRow[];
-        page: number;
-        pageSize: number;
-        total: number;
-      };
-      setRows(body.data);
-      setPage(body.page);
-      setPageSize(body.pageSize);
-      setTotal(body.total);
     },
     [],
   );
 
-  const filtersRef = React.useRef(filters.values);
+  const appliedRef = React.useRef(appliedFilters);
+  React.useEffect(() => {
+    appliedRef.current = appliedFilters;
+  }, [appliedFilters]);
+
+  const hydratedDraftRef = React.useRef(false);
+  React.useEffect(() => {
+    if (filters.restoredDraft && !hydratedDraftRef.current) {
+      hydratedDraftRef.current = true;
+      void loadReport(filters.values, 1, pageSize);
+    }
+  }, [filters.restoredDraft, filters.values, loadReport, pageSize]);
 
   React.useEffect(() => {
-    filtersRef.current = filters.values;
-  }, [filters.values]);
-
-  React.useEffect(() => {
-    // Pagination changes refetch with the latest saved filter selections.
-    void loadReport(filtersRef.current, page, pageSize);
+    // Pagination changes refetch with the latest committed report snapshot.
+    void loadReport(appliedRef.current, page, pageSize);
   }, [loadReport, page, pageSize]);
 
   const runReport = () => {
@@ -149,7 +175,7 @@ export default function AdminReportsPage() {
   };
 
   const exportUrl = (format: "csv" | "pdf") =>
-    `/api/admin/reports?${buildQuery(filters.values, { format, pageSize: "50" })}`;
+    `/api/admin/reports?${buildQuery(appliedFilters, { format, pageSize: "50" })}`;
 
   if (!user) {
     return (
@@ -190,7 +216,7 @@ export default function AdminReportsPage() {
         )}
 
         {/* Filters */}
-        <section aria-labelledby="filters-heading" className="rounded-sm border border-border bg-card p-4">
+        <section aria-labelledby="filters-heading" className="rounded-xl border border-border bg-card p-5 shadow-xs lg:p-6">
           <h2 id="filters-heading" className="flex items-center gap-2 text-base font-semibold">
             <Filter className="size-4 text-muted-foreground" />
             Report filters
@@ -199,14 +225,17 @@ export default function AdminReportsPage() {
             <div className="grid gap-1.5">
               <label htmlFor="report-type" className="text-xs text-muted-foreground">Report type</label>
               <Select
+                items={REPORT_TYPES}
                 value={filters.values.type}
                 onValueChange={(value) => {
                   filters.setValues({ type: value ?? "" });
                   setPage(1);
                 }}
               >
-                <SelectTrigger id="report-type" aria-label="Report type" className="w-full">
-                  <SelectValue placeholder="Report type" />
+                <SelectTrigger id="report-type" aria-label="Report type" className="h-10 min-h-10 sm:min-h-10 w-full min-w-0 overflow-hidden">
+                  <SelectValue placeholder="Report type" className="min-w-0 truncate">
+                    {(value: string | null) => REPORT_TYPES.find((type) => type.value === value)?.label ?? "Report type"}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {REPORT_TYPES.map((t) => (
@@ -220,16 +249,24 @@ export default function AdminReportsPage() {
             {showBatchFilters && (
               <>
                 <div className="grid gap-1.5">
-                  <span className="text-xs text-muted-foreground">Batch</span>
+                  <label htmlFor="report-batch" className="text-xs text-muted-foreground">Batch</label>
                   <Select
+                    items={[
+                      { value: "ALL", label: "All batches" },
+                      ...batches.map((batch) => ({ value: batch.id, label: batch.name })),
+                    ]}
                     value={filters.values.batchId || "ALL"}
                     onValueChange={(value) => {
                       filters.setValues({ batchId: value === "ALL" ? "" : (value ?? "") });
                       setPage(1);
                     }}
                   >
-                    <SelectTrigger aria-label="Batch" className="w-full">
-                      <SelectValue placeholder="All batches" />
+                    <SelectTrigger id="report-batch" aria-label="Batch" className="h-10 min-h-10 sm:min-h-10 w-full min-w-0 overflow-hidden">
+                      <SelectValue placeholder="All batches" className="min-w-0 truncate">
+                        {(value: string | null) => value === "ALL"
+                          ? "All batches"
+                          : batches.find((batch) => batch.id === value)?.name ?? (batchesLoaded ? "Unavailable batch" : "Loading batches…")}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="ALL">All batches</SelectItem>
@@ -241,63 +278,98 @@ export default function AdminReportsPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <FloatingInput
-                  id="report-section"
-                  label="Section"
-                  value={filters.values.section}
-                  onChange={(e) => filters.setValues({ section: e.target.value })}
-                />
+                <div className="grid gap-1.5">
+                  <label htmlFor="report-section" className="text-xs text-muted-foreground">Section</label>
+                  <Input
+                    id="report-section"
+                    value={filters.values.section}
+                    onChange={(e) => filters.setValues({ section: e.target.value })}
+                    className="h-10 min-h-10 sm:min-h-10"
+                  />
+                </div>
                 <div className="grid gap-1.5">
                   <label htmlFor="report-from" className="text-xs text-muted-foreground">
                     Date from
                   </label>
-                  <input
+                  <Input
                     id="report-from"
                     type="date"
                     value={filters.values.dateFrom}
                     onChange={(e) => filters.setValues({ dateFrom: e.target.value })}
-                    className="min-h-11 rounded-sm border border-input bg-background px-2 text-sm sm:min-h-10"
+                    className="h-10 min-h-10 sm:min-h-10"
                   />
                 </div>
                 <div className="grid gap-1.5">
                   <label htmlFor="report-to" className="text-xs text-muted-foreground">
                     Date to
                   </label>
-                  <input
+                  <Input
                     id="report-to"
                     type="date"
                     value={filters.values.dateTo}
                     onChange={(e) => filters.setValues({ dateTo: e.target.value })}
-                    className="min-h-11 rounded-sm border border-input bg-background px-2 text-sm sm:min-h-10"
+                    className="h-10 min-h-10 sm:min-h-10"
                   />
                 </div>
               </>
             )}
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2 [&_button]:max-w-full [&_button]:whitespace-normal">
-            <Button type="button" onClick={runReport}>
-              Generate report
+            <Button type="button" onClick={runReport} disabled={isGenerating}>
+              {isGenerating ? "Generating…" : "Generate report"}
             </Button>
-            <a className={buttonVariants({ variant: "outline" })} href={exportUrl("csv")} download>
-              <FileDown className="size-4" />
-              Export CSV
-            </a>
-            <a className={buttonVariants({ variant: "outline" })} href={exportUrl("pdf")} download>
-              <FileText className="size-4" />
-              Export PDF
-            </a>
+            {isStale ? (
+              <>
+                <Button type="button" variant="outline" disabled>
+                  <FileDown className="size-4" />
+                  Export CSV
+                </Button>
+                <Button type="button" variant="outline" disabled>
+                  <FileText className="size-4" />
+                  Export PDF
+                </Button>
+              </>
+            ) : (
+              <>
+                <a className={buttonVariants({ variant: "outline" })} href={exportUrl("csv")} download>
+                  <FileDown className="size-4" />
+                  Export CSV
+                </a>
+                <a className={buttonVariants({ variant: "outline" })} href={exportUrl("pdf")} download>
+                  <FileText className="size-4" />
+                  Export PDF
+                </a>
+              </>
+            )}
           </div>
-          {filters.isDirty && (
+          {isStale ? (
+            <p role="status" className="mt-2 text-xs font-medium text-warning">
+              Filters changed — click Generate report to refresh results and unlock exports for the new snapshot.
+            </p>
+          ) : filters.isDirty ? (
             <p className="mt-2 text-xs text-muted-foreground">Filter selections preserved locally on this device.</p>
-          )}
+          ) : null}
         </section>
 
         {/* Report table */}
-        <section aria-labelledby="table-heading" className="rounded-sm border border-border bg-card p-4 lg:p-5">
-          <h2 id="table-heading" className="text-base font-semibold">
-            Report results
-          </h2>
-          {rows.length === 0 ? (
+        <section aria-labelledby="table-heading" className="rounded-xl border border-border bg-card p-5 shadow-xs lg:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="table-heading" className="text-base font-semibold">
+              Report results
+            </h2>
+            <span className="text-xs text-muted-foreground">
+              Snapshot: {REPORT_TYPES.find((t) => t.value === appliedFilters.type)?.label ?? appliedFilters.type}
+            </span>
+          </div>
+          {isStale ? (
+            <div className="mt-4 rounded-lg border border-dashed border-border bg-muted/40 p-6 text-center">
+              <p className="text-sm font-medium">Report filters updated</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Previous results are hidden so stale rows are never mistaken for the selected report type. Click{" "}
+                <strong>Generate report</strong> to load the updated dataset.
+              </p>
+            </div>
+          ) : rows.length === 0 ? (
             <p className="mt-4 text-sm text-muted-foreground">
               No rows matched the selected filters. Adjust the filters or generate the report again.
             </p>
@@ -305,44 +377,93 @@ export default function AdminReportsPage() {
             <div className="mt-4 min-w-0 max-w-full overflow-x-auto">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Batch</TableHead>
-                    <TableHead>Section</TableHead>
-                    <TableHead>Metric</TableHead>
-                    <TableHead>Value</TableHead>
-                    <TableHead>Detail</TableHead>
-                  </TableRow>
+                  {appliedFilters.type === "task-progress" ? (
+                    <TableRow>
+                      <TableHead>Batch</TableHead>
+                      <TableHead>Section</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Student &amp; Task</TableHead>
+                    </TableRow>
+                  ) : appliedFilters.type === "lab-equipment" ? (
+                    <TableRow>
+                      <TableHead>Laboratory Room</TableHead>
+                      <TableHead>Unit Code</TableHead>
+                      <TableHead>Condition</TableHead>
+                    </TableRow>
+                  ) : (
+                    <TableRow>
+                      <TableHead>Batch</TableHead>
+                      <TableHead>Section</TableHead>
+                      <TableHead>Recorded Hours</TableHead>
+                      <TableHead>Status &amp; Student</TableHead>
+                    </TableRow>
+                  )}
                 </TableHeader>
                 <TableBody>
-                  {rows.map((row, index) => (
-                    <TableRow key={`${row.label}-${index}`}>
-                      <TableCell>{row.batch || "—"}</TableCell>
-                      <TableCell>{row.section || "—"}</TableCell>
-                      <TableCell>{row.metric}</TableCell>
-                      <TableCell className="tabular-ledger">{row.value}</TableCell>
-                      <TableCell className="max-w-[min(18rem,45vw)]">
-                        {row.label ? (
-                          <div className="grid gap-0.5">
-                            {row.label.split(" - ").map((part, i) => (
-                              <span
-                                key={i}
-                                title={part}
-                                className={
-                                  i === 0
-                                    ? "truncate font-medium"
-                                    : "truncate text-xs text-muted-foreground"
+                  {rows.map((row, index) => {
+                    if (appliedFilters.type === "lab-equipment") {
+                      const [roomName, unitCode] = (row.label || "").split(" - ");
+                      return (
+                        <TableRow key={`${row.label}-${index}`}>
+                          <TableCell className="font-medium">{roomName || "—"}</TableCell>
+                          <TableCell className="font-mono text-xs tabular-ledger">{unitCode || "—"}</TableCell>
+                          <TableCell>
+                            <StatusBadge status={row.value} />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    }
+                    if (appliedFilters.type === "task-progress") {
+                      const [studentName, ...taskParts] = (row.label || "").split(" - ");
+                      const taskTitle = taskParts.join(" - ");
+                      return (
+                        <TableRow key={`${row.label}-${index}`}>
+                          <TableCell>{row.batch || "—"}</TableCell>
+                          <TableCell>{row.section || "—"}</TableCell>
+                          <TableCell>
+                            <StatusBadge status={row.value} />
+                          </TableCell>
+                          <TableCell className="max-w-[min(22rem,50vw)]">
+                            <div className="grid gap-0.5">
+                              <span className="truncate font-medium" title={studentName}>{studentName || "—"}</span>
+                              {taskTitle && (
+                                <span className="truncate text-xs text-muted-foreground" title={taskTitle}>{taskTitle}</span>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    }
+                    return (
+                      <TableRow key={`${row.label}-${index}`}>
+                        <TableCell>{row.batch || "—"}</TableCell>
+                        <TableCell>{row.section || "—"}</TableCell>
+                        <TableCell className="tabular-ledger">{row.value} hrs</TableCell>
+                        <TableCell className="max-w-[min(22rem,45vw)]">
+                          {row.label ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              {(() => {
+                                const parts = row.label.split(" - ");
+                                const maybeStatus = parts[0];
+                                const rest = parts.slice(1).join(" - ");
+                                if (["PENDING", "APPROVED", "REJECTED", "ESCALATED"].includes(maybeStatus)) {
+                                  return (
+                                    <>
+                                      <StatusBadge status={maybeStatus} />
+                                      <span className="truncate text-sm" title={rest}>{rest || "—"}</span>
+                                    </>
+                                  );
                                 }
-                              >
-                                {part}
-                              </span>
-                            ))}
-                          </div>
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                                return <span className="truncate font-medium" title={row.label}>{row.label}</span>;
+                              })()}
+                            </div>
+                          ) : (
+                            "—"
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
               <div className="mt-3 min-w-0 max-w-full [&_div]:flex-wrap [&_button]:max-w-full [&_button]:whitespace-normal">

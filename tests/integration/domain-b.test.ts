@@ -3,10 +3,10 @@ import {
   attendanceInputSchema,
   evaluateAttendanceSchedule,
   isMandatoryReviewRemarkValid,
-} from "@/app/api/attendance/route";
-import { canMarkPreOjtCompleted } from "@/app/api/attendance/[id]/review/route";
-import { isStudentVisibleRemark } from "@/app/api/tasks/[id]/route";
-import { taskReviewInputSchema } from "@/app/api/tasks/[id]/review/route";
+  canMarkPreOjtCompleted,
+  isStudentVisibleRemark,
+  taskReviewInputSchema,
+} from "@/lib/domain-rules";
 
 describe("Domain B attendance and task rules", () => {
   it("rejects GPS/geolocation fields instead of accepting or storing them", () => {

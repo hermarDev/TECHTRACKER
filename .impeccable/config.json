@@ -1,3 +1,15 @@
 {
-  "buildPath": "code"
+  "buildPath": "code",
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "plus jakarta sans",
+        "createdAt": "2026-11-24T06:47:36.021Z",
+        "reason": "DESIGN.md specifies Plus Jakarta Sans as primary body font"
+      }
+    ]
+  }
 }

@@ -1,11 +1,11 @@
-/* Authenticated and local preview images bypass the Next image optimizer. */
-/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import * as React from "react";
 import { useParams } from "next/navigation";
 import { AppShell } from "@/components/shell/AppShell";
+import { EvidencePreview } from "@/components/shell/EvidencePreview";
 import { StatusBadge } from "@/components/shell/StatusBadge";
+import { formatSafeDateTime, normalizeTaskAttachments, type RawAttachmentEntry } from "@/lib/task-format";
 import { toast } from "sonner";
 import { File, Image as ImageIcon, CheckCircle2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,10 +22,10 @@ type Submission = {
   id: string;
   version: number;
   summary: string;
-  attachmentKeys: string[];
+  attachmentKeys: RawAttachmentEntry[];
   submittedAt: string;
 };
-type Remark = { body: string; visibility: string; author: { fullName: string }; createdAt: string };
+type Remark = { body: string; visibility: string; author?: { fullName?: string | null } | null; createdAt: string };
 type Assignment = {
   id: string;
   status: string;
@@ -125,7 +125,7 @@ export default function AdminTaskDetailPage() {
     <AppShell user={user} title={task.title} subtitle="Student-visible return remarks and private staff notes.">
       <div className="space-y-4">
         {task.assignments.map((assignment) => (
-          <article key={assignment.id} className="rounded-sm border border-border bg-card p-4 lg:p-5">
+          <article key={assignment.id} className="rounded-xl border border-border bg-card p-5 shadow-xs lg:p-6">
             <CardContent className="space-y-4">
               <div className="flex justify-between items-start">
                 <div>
@@ -139,25 +139,30 @@ export default function AdminTaskDetailPage() {
 
               <div className="space-y-2">
                 <p className="font-medium">Latest Submission</p>
-                <div className="rounded-sm border bg-muted p-4">
+                <div className="rounded-lg border bg-muted p-4">
                   {assignment.submissions.length > 0 ? (
                     <>
                       <p className="whitespace-pre-wrap text-sm">{assignment.submissions[0].summary}</p>
-                      {assignment.submissions[0].attachmentKeys.length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {assignment.submissions[0].attachmentKeys.map((key) => (
-                            <Button
-                              key={key}
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openPreview(`/api/files/${key}`)}
-                            >
-                              {key.match(/\.(jpg|jpeg|png|webp)$/i) ? <ImageIcon className="size-3 mr-1" /> : <File className="size-3 mr-1" />}
-                              Attachment
-                            </Button>
-                          ))}
-                        </div>
-                      )}
+                      {(() => {
+                        const attachments = normalizeTaskAttachments(assignment.submissions[0].attachmentKeys);
+                        if (attachments.length === 0) return null;
+                        return (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {attachments.map((att) => (
+                              <Button
+                                key={att.key}
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openPreview(att.key)}
+                              >
+                                {att.isImage ? <ImageIcon className="size-3 mr-1" /> : <File className="size-3 mr-1" />}
+                                {att.name}
+                              </Button>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </>
                   ) : (
                     <p className="text-sm text-muted-foreground">No submission yet.</p>
@@ -230,7 +235,7 @@ export default function AdminTaskDetailPage() {
                 ) : (
                   <div className="space-y-3">
                     {assignment.remarks.map((remark, index) => (
-                      <div key={index} className="rounded-sm border bg-muted p-3">
+                      <div key={index} className="rounded-lg border bg-muted p-3">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-medium">
                             {remark.visibility === "STUDENT_VISIBLE" ? (
@@ -240,7 +245,7 @@ export default function AdminTaskDetailPage() {
                             )}
                           </span>
                           <span className="text-xs text-muted-foreground">
-                            {remark.author.fullName} · {new Date(remark.createdAt).toLocaleString()}
+                            {remark.author?.fullName ?? "Coordinator"} · {formatSafeDateTime(remark.createdAt)}
                           </span>
                         </div>
                         <p className="mt-2 whitespace-pre-wrap text-sm">{remark.body}</p>
@@ -261,32 +266,36 @@ export default function AdminTaskDetailPage() {
                     {assignment.submissions
                       .slice()
                       .sort((a, b) => b.version - a.version)
-                      .map((submission) => (
-                        <div key={submission.id} className="rounded-sm border bg-muted p-4">
+                      .map((submission) => {
+                        const attachments = normalizeTaskAttachments(submission.attachmentKeys);
+                        return (
+                        <div key={submission.id} className="rounded-lg border bg-muted p-4">
                           <div className="flex items-center justify-between">
                             <span className="font-medium">Version {submission.version}</span>
                             <span className="text-sm text-muted-foreground">
-                              {new Date(submission.submittedAt).toLocaleString()}
+                              {formatSafeDateTime(submission.submittedAt)}
                             </span>
                           </div>
                           <p className="mt-2 whitespace-pre-wrap text-sm">{submission.summary}</p>
-                          {submission.attachmentKeys.length > 0 && (
+                          {attachments.length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-2">
-                              {submission.attachmentKeys.map((key) => (
+                              {attachments.map((att) => (
                                 <Button
-                                  key={key}
+                                  key={att.key}
+                                  type="button"
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => openPreview(`/api/files/${key}`)}
+                                  onClick={() => openPreview(att.key)}
                                 >
-                                  {key.match(/\.(jpg|jpeg|png|webp)$/i) ? <ImageIcon className="size-3 mr-1" /> : <File className="size-3 mr-1" />}
-                                  Attachment
+                                  {att.isImage ? <ImageIcon className="size-3 mr-1" /> : <File className="size-3 mr-1" />}
+                                  {att.name}
                                 </Button>
                               ))}
                             </div>
                           )}
                         </div>
-                      ))}
+                      );
+                      })}
                   </div>
                 )}
               </div>
@@ -299,14 +308,8 @@ export default function AdminTaskDetailPage() {
             <DialogHeader>
               <DialogTitle>Attachment Preview</DialogTitle>
             </DialogHeader>
-            <div className="flex items-center justify-center p-4">
-              {previewImage && (
-                <img
-                  src={previewImage}
-                  alt="Preview"
-                  className="max-w-full max-h-[70vh] object-contain rounded-sm"
-                />
-              )}
+            <div className="p-2">
+              <EvidencePreview fileKey={previewImage} alt="Submission attachment preview" />
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsPreviewOpen(false)}>Close</Button>

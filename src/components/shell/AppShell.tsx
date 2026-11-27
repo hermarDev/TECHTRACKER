@@ -19,7 +19,7 @@ import {
   Users,
   Layers,
 } from "lucide-react";
-import type { Role } from "@prisma/client";
+import type { Role } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { ThemeToggle } from "./ThemeToggle";
@@ -34,10 +34,13 @@ export interface ShellUser {
   section?: string | null;
 }
 
+type NavGroup = "Workspace" | "Management" | "Governance" | "Communication" | "Account";
+
 interface NavItem {
   href: string;
   label: string;
   shortLabel?: string;
+  group: NavGroup;
   icon: React.ComponentType<{ className?: string }>;
   matchPrefix?: string;
 }
@@ -45,38 +48,40 @@ interface NavItem {
 function getNavForRole(role: Role): NavItem[] {
   if (role === "SUPERADMIN") {
     return [
-      { href: "/superadmin", label: "Console", icon: Shield },
-      { href: "/admin/attendance", label: "Attendance", shortLabel: "Duty", icon: CalendarClock },
-      { href: "/admin/tasks", label: "Tasks", icon: ClipboardCheck },
-      { href: "/inspections", label: "Lab Units", icon: Laptop },
-      { href: "/admin/batches", label: "Batches", icon: Layers },
-      { href: "/admin/students", label: "Directory", icon: Users },
-      { href: "/admin/reports", label: "Reports", icon: FileBarChart2 },
-      { href: "/notifications", label: "Alerts", icon: Bell },
-      { href: "/profile", label: "Account Settings", icon: UserCircle },
+      { href: "/superadmin", label: "Console", group: "Workspace", icon: Shield },
+      { href: "/admin/attendance", label: "Attendance", shortLabel: "Duty", group: "Workspace", icon: CalendarClock },
+      { href: "/admin/tasks", label: "Tasks", group: "Workspace", icon: ClipboardCheck },
+      { href: "/inspections", label: "Lab Units", group: "Workspace", icon: Laptop },
+      { href: "/admin/batches", label: "Batches", group: "Management", icon: Layers },
+      { href: "/admin/students", label: "Directory", group: "Management", icon: Users },
+      { href: "/admin/reports", label: "Reports", group: "Management", icon: FileBarChart2 },
+      { href: "/notifications", label: "Alerts", group: "Governance", icon: Bell },
+      { href: "/profile", label: "Account Settings", group: "Account", icon: UserCircle },
     ];
   }
   if (role === "ADMIN") {
     return [
-      { href: "/admin", label: "Dashboard", icon: Home },
-      { href: "/admin/attendance", label: "Attendance", shortLabel: "Duty", icon: CalendarClock },
-      { href: "/admin/tasks", label: "Tasks", icon: ClipboardCheck },
-      { href: "/inspections", label: "Lab Audit", icon: Laptop },
-      { href: "/admin/batches", label: "Batches", icon: Layers },
-      { href: "/admin/students", label: "Directory", icon: Users },
-      { href: "/admin/reports", label: "Reports", icon: FileBarChart2 },
-      { href: "/messages", label: "Messages", icon: MessageSquare },
-      { href: "/profile", label: "Account Settings", icon: UserCircle },
+      { href: "/admin", label: "Dashboard", group: "Workspace", icon: Home },
+      { href: "/admin/attendance", label: "Attendance", shortLabel: "Duty", group: "Workspace", icon: CalendarClock },
+      { href: "/admin/tasks", label: "Tasks", group: "Workspace", icon: ClipboardCheck },
+      { href: "/inspections", label: "Lab Audit", group: "Workspace", icon: Laptop },
+      { href: "/admin/batches", label: "Batches", group: "Management", icon: Layers },
+      { href: "/admin/students", label: "Directory", group: "Management", icon: Users },
+      { href: "/admin/reports", label: "Reports", group: "Management", icon: FileBarChart2 },
+      { href: "/messages", label: "Messages", group: "Communication", icon: MessageSquare },
+      { href: "/notifications", label: "Notifications", group: "Communication", icon: Bell },
+      { href: "/profile", label: "Account Settings", group: "Account", icon: UserCircle },
     ];
   }
   // STUDENT (04W Student Nav: Home, Attendance, Tasks, Lab Audit, Chat, Account settings)
   return [
-    { href: "/student", label: "Home", icon: Home },
-    { href: "/attendance", label: "Attendance", shortLabel: "Duty", icon: CalendarClock },
-    { href: "/tasks", label: "Tasks", icon: ClipboardCheck },
-    { href: "/inspections", label: "Lab Audit", icon: Laptop },
-    { href: "/messages", label: "Chat", icon: MessageSquare },
-    { href: "/profile", label: "Account Settings", icon: UserCircle },
+    { href: "/student", label: "Home", group: "Workspace", icon: Home },
+    { href: "/attendance", label: "Attendance", shortLabel: "Duty", group: "Workspace", icon: CalendarClock },
+    { href: "/tasks", label: "Tasks", group: "Workspace", icon: ClipboardCheck },
+    { href: "/inspections", label: "Lab Audit", group: "Workspace", icon: Laptop },
+    { href: "/messages", label: "Chat", group: "Communication", icon: MessageSquare },
+    { href: "/notifications", label: "Notifications", group: "Communication", icon: Bell },
+    { href: "/profile", label: "Account Settings", group: "Account", icon: UserCircle },
   ];
 }
 
@@ -152,30 +157,48 @@ export function AppShell({
           </div>
         </div>
 
-        <nav className="flex-1 space-y-1 overflow-y-auto p-3" aria-label="Primary navigation">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active =
-              pathname === item.href ||
-              (item.href !== "/admin" &&
-                item.href !== "/student" &&
-                item.href !== "/superadmin" &&
-                pathname.startsWith(item.href + "/"));
+        <nav className="flex-1 space-y-4 overflow-y-auto p-3" aria-label="Primary navigation">
+          {(["Workspace", "Management", "Governance", "Communication", "Account"] as const).map((group) => {
+            const groupItems = navItems.filter((item) => item.group === group);
+            if (groupItems.length === 0) return null;
             return (
-              <Link
-                key={item.href}
-                href={item.href}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex min-h-11 items-center gap-3 rounded-sm px-3 py-2 text-sm font-medium transition-colors",
-                  active
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                    : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
-                )}
-              >
-                <Icon className="size-4 shrink-0" aria-hidden="true" />
-                <span className="truncate">{item.label}</span>
-              </Link>
+              <div key={group} className="space-y-1">
+                <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/55">
+                  {group}
+                </p>
+                {groupItems.map((item) => {
+                  const Icon = item.icon;
+                  const active =
+                    pathname === item.href ||
+                    (item.href !== "/admin" &&
+                      item.href !== "/student" &&
+                      item.href !== "/superadmin" &&
+                      pathname.startsWith(item.href + "/"));
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      aria-current={active ? "page" : undefined}
+                      className={cn(
+                        "flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors duration-150",
+                        active
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-xs"
+                          : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
+                      )}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          "size-1.5 shrink-0 rounded-full",
+                          active ? "bg-sidebar-primary" : "bg-sidebar-foreground/30"
+                        )}
+                      />
+                      <Icon className="size-4 shrink-0" aria-hidden="true" />
+                      <span className="truncate">{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
             );
           })}
         </nav>
@@ -200,32 +223,52 @@ export function AppShell({
 
       {/* Main Content Workspace */}
       <div className="flex min-w-0 flex-1 flex-col pb-20 lg:pb-0">
-        <header className="sticky top-0 z-30 flex h-auto min-h-16 flex-wrap items-center justify-between gap-3 border-b border-border bg-background/95 px-4 py-2 lg:px-8">
-          <div className="min-w-0">
-            <h1 className="truncate text-lg font-semibold tracking-tight lg:text-xl">{title}</h1>
-            {subtitle && (
-              <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
-            )}
+        <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-border bg-card/95 px-4 backdrop-blur-xs lg:px-8">
+          <div className="flex min-w-0 items-center gap-2 text-xs font-medium text-muted-foreground">
+            <span className="truncate text-foreground">{roleLabel}</span>
+            <span aria-hidden="true">/</span>
+            <span className="truncate">{title}</span>
           </div>
           <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 [&_button]:max-w-full [&_button]:whitespace-normal">
-            {actions}
             <Link
               href="/notifications"
               aria-label={`Notifications (${unread} unread)`}
-              className="relative inline-flex size-11 items-center justify-center rounded-sm border border-border bg-card text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="relative inline-flex size-10 sm:size-9 items-center justify-center rounded-lg border border-border bg-card text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Bell className="size-4" />
               {unread > 0 && (
-                <span className="absolute right-1.5 top-1.5 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground tabular-ledger">
+                <span className="absolute right-1 top-1 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground tabular-ledger">
                   {unread > 99 ? "99+" : unread}
                 </span>
               )}
             </Link>
             <ThemeToggle />
+            <Link
+              href="/profile"
+              className="hidden h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-xs font-medium text-foreground hover:bg-muted sm:inline-flex"
+            >
+              <UserCircle className="size-3.5 text-muted-foreground" aria-hidden="true" />
+              <span>Account</span>
+            </Link>
           </div>
         </header>
 
-        <main className="flex-1 px-4 py-5 lg:px-8 lg:py-6">{children}</main>
+        <main className="flex-1 px-4 py-6 lg:px-8 lg:py-8">
+          <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-bold tracking-tight text-foreground lg:text-[28px]">{title}</h1>
+              {subtitle && (
+                <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
+              )}
+            </div>
+            {actions && (
+              <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 [&_button]:max-w-full [&_button]:whitespace-normal">
+                {actions}
+              </div>
+            )}
+          </div>
+          {children}
+        </main>
       </div>
 
       {/* Mobile Bottom Navigation */}
@@ -283,7 +326,7 @@ export function AppShell({
                     key={item.href}
                     href={item.href}
                     onClick={() => setMoreOpen(false)}
-                    className="flex min-h-11 items-center gap-3 rounded-sm border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+                    className="flex min-h-11 items-center gap-3 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
                   >
                     <Icon className="size-4" />
                     <span>{item.label}</span>

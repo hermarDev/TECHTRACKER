@@ -1,13 +1,13 @@
 "use client";
 
-import { BrandLogo } from "@/components/shell/BrandLogo";
+import { PublicHeader } from "@/components/shell/PublicHeader";
 import * as React from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { CheckCircle2, CircleAlert, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { PasswordInput } from "@/components/shell/PasswordInput";
 
 function ResetPasswordForm() {
@@ -54,97 +54,102 @@ function ResetPasswordForm() {
   };
 
   return (
-    <div className="flex min-h-screen flex-1 items-center justify-center bg-muted/40 px-4 py-10">
-      <div className="w-full max-w-md space-y-6">
-        <div className="text-center">
-          <BrandLogo className="mx-auto size-12" />
-          <h1 className="mt-4 text-2xl font-semibold tracking-tight">Set a New Password</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Password reset — ACLC College of Mandaue BSIT Pre-OJT
-          </p>
-        </div>
+    <div className="flex min-h-screen flex-1 flex-col bg-background">
+      <PublicHeader />
+      <main className="flex flex-1 flex-col items-center justify-center px-4 py-10">
+        <div className="w-full max-w-[480px] space-y-6">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+              Set a new password
+            </h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Use a valid, unexpired reset link.
+            </p>
+          </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Reset your password</CardTitle>
-            <CardDescription>
-              Choose a new password with at least 8 characters.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {success ? (
-              <div
-                role="status"
-                className="flex items-start gap-2.5 rounded-sm border border-success-surface/40 bg-success-surface/10 px-3.5 py-3 text-sm text-success"
-              >
-                <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                <div className="space-y-1">
-                  <p className="font-medium">Password updated successfully.</p>
-                  <p>
-                    You can now{" "}
-                    <Link href="/login" className="font-medium underline underline-offset-4">
-                      sign in
-                    </Link>{" "}
-                    with your new password.
-                  </p>
+          <Card className="rounded-xl border-border bg-card shadow-xs">
+            <CardContent className="p-6 sm:p-8">
+              {success ? (
+                <div
+                  role="status"
+                  className="flex items-start gap-2.5 rounded-lg border border-success-surface/40 bg-success-surface/10 px-3.5 py-3 text-sm text-success"
+                >
+                  <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                  <div className="space-y-1">
+                    <p className="font-medium">Password updated successfully.</p>
+                    <p>
+                      You can now{" "}
+                      <Link href="/login" className="font-medium underline underline-offset-4">
+                        sign in
+                      </Link>{" "}
+                      with your new password.
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <>
-                {error && (
-                  <div
-                    role="alert"
-                    className="mb-4 flex items-start gap-2.5 rounded-sm border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
-                  >
-                    <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                    <span>{error}</span>
-                  </div>
-                )}
-                {token === null && (
-                  <div
-                    role="alert"
-                    className="mb-4 flex items-start gap-2.5 rounded-sm border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
-                  >
-                    <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                    <span>Missing reset token. Open the link from your password reset email.</span>
-                  </div>
-                )}
-                <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-                  <PasswordInput
-                    id="password"
-                    required
-                    autoComplete="new-password"
-                    label="New password (at least 8 characters)"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    aria-invalid={Boolean(error)}
-                  />
-                  <PasswordInput
-                    id="confirmPassword"
-                    required
-                    autoComplete="new-password"
-                    label="Confirm new password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    aria-invalid={Boolean(error)}
-                  />
-                  <Button type="submit" className="h-11 w-full gap-2 text-base" disabled={submitting}>
-                    <KeyRound className="size-4" aria-hidden="true" />
-                    <span>{submitting ? "Updating..." : "Update password"}</span>
-                  </Button>
-                </form>
-              </>
-            )}
-          </CardContent>
-        </Card>
+              ) : (
+                <>
+                  {error && (
+                    <div
+                      role="alert"
+                      className="mb-4 flex items-start gap-2.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
+                    >
+                      <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                      <span>{error}</span>
+                    </div>
+                  )}
+                  {token === null && (
+                    <div
+                      role="alert"
+                      className="mb-4 flex items-start gap-2.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
+                    >
+                      <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                      <span>Missing reset token. Open the link from your password reset email.</span>
+                    </div>
+                  )}
+                  <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+                    <PasswordInput
+                      id="password"
+                      required
+                      autoComplete="new-password"
+                      label="New password (at least 8 characters)"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      aria-invalid={Boolean(error)}
+                    />
+                    <PasswordInput
+                      id="confirmPassword"
+                      required
+                      autoComplete="new-password"
+                      label="Confirm new password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      aria-invalid={Boolean(error)}
+                    />
+                    <Button type="submit" className="h-11 w-full gap-2 text-sm font-semibold" disabled={submitting}>
+                      <KeyRound className="size-4" aria-hidden="true" />
+                      <span>{submitting ? "Updating..." : "Update password"}</span>
+                    </Button>
+                  </form>
+                </>
+              )}
+            </CardContent>
+          </Card>
 
-        <p className="text-center text-sm text-muted-foreground">
-          Link expired?{" "}
-          <Link href="/forgot-password" className="font-medium text-primary underline-offset-4 hover:underline">
-            Request a new reset link
-          </Link>
-        </p>
-      </div>
+          <div className="space-y-2 text-center text-sm">
+            <p className="text-muted-foreground">
+              Link expired?{" "}
+              <Link href="/forgot-password" className="font-medium text-primary underline-offset-4 hover:underline">
+                Request a new reset link
+              </Link>
+            </p>
+            <p>
+              <Link href="/" className="text-xs text-muted-foreground hover:text-foreground hover:underline">
+                Back to homepage
+              </Link>
+            </p>
+          </div>
+        </div>
+      </main>
     </div>
   );
 }
