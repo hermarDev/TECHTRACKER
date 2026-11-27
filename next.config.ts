@@ -16,7 +16,12 @@ const nextConfig: NextConfig = {
     },
   },
   async rewrites() {
-    if (!rustBackend) return [];
+    if (!rustBackend) {
+      if (process.env.NODE_ENV === "production") {
+        throw new Error("RUST_BACKEND_URL is required in production");
+      }
+      return [];
+    }
     return [
       {
         source: "/api/:path*",

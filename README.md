@@ -23,7 +23,7 @@ TechTracker is a web application that monitors and documents a student's **100 h
                                   └──────────────────────┘
 ```
 
-- **Next.js** is the frontend shell and (fallback) API host. `next.config.ts` rewrites every `/api/*` request to `RUST_BACKEND_URL`, so the Rust backend is the **canonical** runtime. The Next handlers under `src/app/api/**` are fallbacks kept during the migration.
+- **Next.js** serves the UI only. `src/app/api/**` has been removed; `next.config.ts` rewrites every `/api/*` request to `RUST_BACKEND_URL`, and `RUST_BACKEND_URL` is required in production.
 - **Rust Axum** (`backend/`) is the canonical API: auth, profile, attendance, tasks, inspections, messages, notifications, admin, superadmin, uploads, files.
 - **Prisma** owns the schema/migrations (`prisma/schema.prisma`); Rust uses sqlx against the same Postgres DB.
 - **Storage:** local filesystem under `.storage/` (configurable via `STORAGE_ROOT`).
@@ -110,6 +110,14 @@ cargo run                # listens on 0.0.0.0:8080
 npm run dev              # http://127.0.0.1:3219
 ```
 
+### Alternative: one command for all three services
+
+```bash
+docker compose up --build   # Postgres :5444, Rust :8080, Next :3219
+npm run db:setup            # schema + raw SQL, including the open-shift index
+npm run db:seed             # demo data
+```
+
 Open `http://127.0.0.1:3219` and sign in with a demo account (password `TechTrack@2026` for all):
 
 | Role | Email |
@@ -135,6 +143,8 @@ Open `http://127.0.0.1:3219` and sign in with a demo account (password `TechTrac
 | `npm test` | Vitest unit/integration tests |
 | `npm run test:e2e` | Playwright E2E suite (desktop + 430 px mobile) |
 | `npm run db:push` | Apply Prisma schema to the DB |
+| `npm run db:post-push` | Apply raw SQL that Prisma cannot express (open-shift unique index) |
+| `npm run db:setup` | `db:push` then `db:post-push`; use this on a fresh DB |
 | `npm run db:seed` | Seed demo data |
 | `cd backend && cargo run` | Run the Rust API |
 | `cd backend && cargo test` | Rust unit tests |
@@ -145,9 +155,9 @@ Open `http://127.0.0.1:3219` and sign in with a demo account (password `TechTrac
 
 ## Testing
 
-- **Vitest** (`tests/integration/*.test.ts`) — 89 tests against the real local Postgres instance. Route handlers are invoked directly with mocked `next/headers` cookies.
-- **Playwright** (`tests/e2e/*.spec.ts`) — 54 tests covering auth, student flows, admin flows, accessibility/overflow, and a 430 px mobile project. Requires both the Next dev server (`:3219`) and the Rust backend (`:8080`) running.
-- **Rust** (`backend/`) — 14 unit tests (config validation, safe storage keys, MIME guessing).
+- **Vitest** (`tests/**/*.test.ts`) — 92 tests. Integration suites call the Rust API at `RUST_BACKEND_URL` (default `http://127.0.0.1:8080`) and read `EmailOutbox` directly from Postgres. Both must be running.
+- **Playwright** (`tests/e2e/*.spec.ts`) — 60 tests (desktop + 430 px mobile). Requires the Next server on `:3219`, the Rust backend on `:8080`, and `DATABASE_URL` in `.env`.
+- **Rust** (`backend/`) — 24 unit tests (config, storage keys, MIME, PDF pagination, rate limiter helpers).
 
 Run everything:
 
@@ -172,11 +182,11 @@ npm test && npm run test:e2e
 
 ```
 Tech_Tracker/
-├── src/                    # Next.js frontend + fallback API routes
-│   ├── app/                # App Router pages & API routes
+├── src/                    # Next.js frontend only (no API routes)
+│   ├── app/                # App Router pages
 │   ├── components/         # UI primitives + shell (AppShell, DataTablePagination, …)
 │   ├── hooks/              # useDraftForm (draft persistence)
-│   └── lib/                # db, rbac, validation, storage, audit
+│   └── lib/                # live UI helpers (rbac-policies, hours, task-format)
 ├── backend/                # Rust Axum API (canonical runtime)
 │   └── src/routes/         # auth, attendance, tasks, inspections, messages, …
 ├── prisma/                 # schema.prisma + seed.ts
@@ -204,7 +214,8 @@ Tech_Tracker/
 
 ## Notes for contributors
 
-- Keep Next and Rust in lockstep when touching API behavior — both implementations are tested (see the parity tests in `tests/e2e/phase3-flows.spec.ts`).
-- The frontend and backend must both be running for the E2E suite and for normal development.
+- Rust is the only API implementation. Frontend pages call it through `/api/*` rewrites.
+- The frontend and backend must both be running for the E2E suite and for normal development. `docker compose up --build` starts Next, Rust and Postgres together.
+- `DB_MAX_CONNECTIONS` controls the Rust pool (default 25). `RUST_BACKEND_URL` is required in production; `APP_URL` or `NEXT_PUBLIC_APP_URL` is required too.
 - `backend/target/`, `.next/`, `.storage/`, and `.env*` (except `.env.example`) are gitignored.
-- See `MIGRATION_TO_RUST.md` for the migration status and the remaining work before the Next fallback handlers are deleted.
+- See `MIGRATION_TO_RUST.md` for the completed migration.

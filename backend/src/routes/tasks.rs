@@ -221,24 +221,24 @@ async fn create(
     let deadline = chrono::DateTime::parse_from_rfc3339(&input.deadline)
         .map_err(|_| AppError::BadRequest("Invalid task assignment.".into()))?;
 
-    // validate students in scope
-    let mut valid_ids: Vec<String> = Vec::new();
+    // validate students in scope with one query, not one per student
     let mut seen_ids = std::collections::HashSet::new();
+    let mut valid_ids: Vec<String> = Vec::new();
     for sid in &input.student_ids {
         if !seen_ids.insert(sid) {
             return Err(AppError::Forbidden);
         }
-        let row = if auth.0.role == "ADMIN" {
-            sqlx::query("SELECT u.id FROM \"User\" u JOIN \"Batch\" b ON u.\"batchId\"=b.id WHERE u.id=$1 AND u.role::text='STUDENT' AND u.status::text='ACTIVE' AND b.\"coordinatorId\"=$2")
-                .bind(sid).bind(&auth.0.sub).fetch_optional(&state.db).await?
-        } else {
-            sqlx::query("SELECT id FROM \"User\" WHERE id=$1 AND role::text='STUDENT' AND status::text='ACTIVE'")
-                .bind(sid).fetch_optional(&state.db).await?
-        };
-        if row.is_none() {
-            return Err(AppError::Forbidden);
-        }
         valid_ids.push(sid.clone());
+    }
+    let valid_count: i64 = if auth.0.role == "ADMIN" {
+        sqlx::query_scalar("SELECT COUNT(*) FROM \"User\" u JOIN \"Batch\" b ON u.\"batchId\"=b.id WHERE u.id = ANY($1) AND u.role::text='STUDENT' AND u.status::text='ACTIVE' AND b.\"coordinatorId\"=$2")
+            .bind(&valid_ids).bind(&auth.0.sub).fetch_one(&state.db).await?
+    } else {
+        sqlx::query_scalar("SELECT COUNT(*) FROM \"User\" WHERE id = ANY($1) AND role::text='STUDENT' AND status::text='ACTIVE'")
+            .bind(&valid_ids).fetch_one(&state.db).await?
+    };
+    if valid_count != valid_ids.len() as i64 {
+        return Err(AppError::Forbidden);
     }
 
     let task_id = Uuid::new_v4().to_string();
@@ -454,6 +454,20 @@ async fn submit(
     if auth.0.role != "STUDENT" {
         return Err(AppError::Forbidden);
     }
+    // Reject an unsubmittable assignment before writing any attachment to disk.
+    let assign = sqlx::query("SELECT id,status::text AS assignment_status FROM \"TaskAssignment\" WHERE \"taskId\"=$1 AND \"studentId\"=$2")
+        .bind(&id)
+        .bind(&auth.0.sub)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let assignment_status: String = assign.try_get("assignment_status")?;
+    if !["IN_PROGRESS", "RETURNED"].contains(&assignment_status.as_str()) {
+        return Err(AppError::Conflict(
+            "Task is not ready for submission.".into(),
+        ));
+    }
+    let aid: String = assign.try_get("id")?;
     let mut summary: Option<String> = None;
     let mut keys: Vec<String> = Vec::new();
     while let Some(mut field) = multipart
@@ -494,14 +508,6 @@ async fn submit(
             "Completion summary is required.".into(),
         ));
     }
-    let assign =
-        sqlx::query("SELECT id FROM \"TaskAssignment\" WHERE \"taskId\"=$1 AND \"studentId\"=$2")
-            .bind(&id)
-            .bind(&auth.0.sub)
-            .fetch_optional(&state.db)
-            .await?
-            .ok_or(AppError::NotFound)?;
-    let aid: String = assign.try_get("id")?;
     let mut tx = state.db.begin().await?;
     let upd = sqlx::query(
         "UPDATE \"TaskAssignment\" SET status='SUBMITTED',\"updatedAt\"=NOW() WHERE id=$1 AND status IN ('IN_PROGRESS','RETURNED')",

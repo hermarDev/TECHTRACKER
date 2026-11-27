@@ -240,6 +240,53 @@ describe("P0 F5 coordinator boundaries", () => {
   });
 });
 
+describe("A3 Manila shift day storage", () => {
+  it("stores an RFC3339 punch on the local calendar day", async () => {
+    const student = await createVerifiedStudent("shift-day");
+    const batch = await batchA();
+    await prisma.user.update({ where: { id: student.id }, data: { batchId: batch.id } });
+    const schedule = await prisma.schedule.findFirstOrThrow({
+      where: { batchId: batch.id },
+    });
+    const cookie = await login(student.email);
+
+    const form = new FormData();
+    form.set("action", "TIME_IN");
+    form.set("scheduleId", schedule.id);
+    form.set("shiftDate", "2026-11-26T16:30:00Z");
+    form.set("photo", new Blob([PNG], { type: "image/png" }), "shift.png");
+    const punched = await api("/api/attendance", { method: "POST", body: form }, cookie);
+    expect(punched.status).toBe(201);
+
+    const stored = await prisma.attendanceLog.findFirstOrThrow({
+      where: { studentId: student.id, timeOut: null },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(stored.shiftDate.toISOString().slice(0, 10)).toBe("2026-11-27");
+
+    const previousDay = await prisma.attendanceLog.create({
+      data: {
+        studentId: student.id,
+        batchId: batch.id,
+        shiftDate: new Date("2026-11-26T00:00:00Z"),
+        timeIn: new Date("2026-11-26T08:00:00Z"),
+        photoInKey: "attendance/a3-previous.png",
+      },
+    });
+    expect(previousDay.id).toBeTruthy();
+  });
+});
+
+describe("A8 fresh-database schema", () => {
+  it("has the partial unique index for open attendance shifts", async () => {
+    const rows = await prisma.$queryRaw<Array<{ indexname: string }>>`
+      SELECT indexname FROM pg_indexes
+      WHERE tablename = 'AttendanceLog' AND indexname = 'AttendanceLog_one_open_per_student_day'
+    `;
+    expect(rows).toHaveLength(1);
+  });
+});
+
 describe("P0 F8 duplicate simultaneous time-ins", () => {
   it("accepts exactly one of two concurrent time-ins for the same day", async () => {
     const student = await createVerifiedStudent("timein");

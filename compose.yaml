@@ -1,0 +1,55 @@
+services:
+  db:
+    image: postgres:19-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-techtracker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-techtracker_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-techtracker}
+    ports:
+      - "5444:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-techtracker} -d ${POSTGRES_DB:-techtracker}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: 8080
+      DATABASE_URL: postgresql://${POSTGRES_USER:-techtracker}:${POSTGRES_PASSWORD:-techtracker_dev}@db:5432/${POSTGRES_DB:-techtracker}?schema=public
+      STORAGE_ROOT: /storage
+      DB_MAX_CONNECTIONS: ${DB_MAX_CONNECTIONS:-25}
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - storage:/storage
+
+  web:
+    build:
+      context: .
+      args:
+        RUST_BACKEND_URL: http://backend:8080
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      RUST_BACKEND_URL: http://backend:8080
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://127.0.0.1:3219}
+    ports:
+      - "3219:3219"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  storage:

@@ -347,6 +347,14 @@ model Message {
   createdAt      DateTime     @default(now())
 }
 
+model RateLimitHit {
+  id          String   @id @default(uuid())
+  bucketKey   String
+  attemptedAt DateTime @default(now())
+
+  @@index([bucketKey, attemptedAt])
+}
+
 model Notification {
   id        String           @id @default(uuid())
   userId    String

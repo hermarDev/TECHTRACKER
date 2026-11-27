@@ -121,32 +121,42 @@ async fn list(
         .build()
         .fetch_all(&state.db)
         .await?;
-    let mut items = Vec::new();
-    for r in rows {
-        let iid: String = r.try_get("id")?;
-        let insp_items = sqlx::query("SELECT id,\"inspectionId\",\"unitId\",condition::text,remarks,\"photoKey\" FROM \"InspectionItem\" WHERE \"inspectionId\"=$1 ORDER BY id ASC")
-            .bind(&iid).fetch_all(&state.db).await.unwrap_or_default();
-        let items_json: Vec<serde_json::Value> = insp_items
-            .into_iter()
-            .map(|it| {
-                json!({
-                    "id": it.try_get::<String,_>("id").unwrap_or_default(),
-                    "inspectionId": it.try_get::<String,_>("inspectionId").unwrap_or_default(),
-                    "unitId": it.try_get::<String,_>("unitId").unwrap_or_default(),
-                    "condition": it.try_get::<String,_>("condition").unwrap_or_default(),
-                    "remarks": it.try_get::<Option<String>,_>("remarks").unwrap_or(None),
-                    "photoKey": it.try_get::<Option<String>,_>("photoKey").unwrap_or(None),
-                })
-            })
-            .collect();
-        let room = sqlx::query("SELECT id,name,building,capacity,\"isActive\",\"assignedAdminId\",\"assignedStudentId\",\"createdAt\"::timestamptz FROM \"LabRoom\" WHERE id=$1")
-            .bind(r.try_get::<String, _>("roomId").unwrap_or_default())
-            .fetch_optional(&state.db)
-            .await
-            .ok()
-            .flatten();
-        let room_json = room.map(|rm| json!({
-            "id": rm.try_get::<String,_>("id").unwrap_or_default(),
+    let inspection_ids: Vec<String> = rows
+        .iter()
+        .map(|r| r.try_get::<String, _>("id").unwrap_or_default())
+        .collect();
+    let room_ids: Vec<String> = rows
+        .iter()
+        .map(|r| r.try_get::<String, _>("roomId").unwrap_or_default())
+        .collect();
+    let inspector_ids: Vec<String> = rows
+        .iter()
+        .map(|r| r.try_get::<String, _>("inspectorId").unwrap_or_default())
+        .collect();
+
+    let mut items_by_inspection: std::collections::HashMap<String, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
+    for it in sqlx::query("SELECT id,\"inspectionId\",\"unitId\",condition::text,remarks,\"photoKey\" FROM \"InspectionItem\" WHERE \"inspectionId\" = ANY($1) ORDER BY id ASC")
+        .bind(&inspection_ids).fetch_all(&state.db).await.unwrap_or_default()
+    {
+        let inspection_id: String = it.try_get("inspectionId").unwrap_or_default();
+        items_by_inspection.entry(inspection_id).or_default().push(json!({
+            "id": it.try_get::<String,_>("id").unwrap_or_default(),
+            "inspectionId": it.try_get::<String,_>("inspectionId").unwrap_or_default(),
+            "unitId": it.try_get::<String,_>("unitId").unwrap_or_default(),
+            "condition": it.try_get::<String,_>("condition").unwrap_or_default(),
+            "remarks": it.try_get::<Option<String>,_>("remarks").unwrap_or(None),
+            "photoKey": it.try_get::<Option<String>,_>("photoKey").unwrap_or(None),
+        }));
+    }
+    let mut rooms_by_id: std::collections::HashMap<String, serde_json::Value> =
+        std::collections::HashMap::new();
+    for rm in sqlx::query("SELECT id,name,building,capacity,\"isActive\",\"assignedAdminId\",\"assignedStudentId\",\"createdAt\"::timestamptz FROM \"LabRoom\" WHERE id = ANY($1)")
+        .bind(&room_ids).fetch_all(&state.db).await.unwrap_or_default()
+    {
+        let id: String = rm.try_get("id").unwrap_or_default();
+        rooms_by_id.insert(id.clone(), json!({
+            "id": id,
             "name": rm.try_get::<String,_>("name").unwrap_or_default(),
             "building": rm.try_get::<String,_>("building").unwrap_or_default(),
             "capacity": rm.try_get::<i32,_>("capacity").unwrap_or(40),
@@ -155,13 +165,34 @@ async fn list(
             "assignedStudentId": rm.try_get::<Option<String>,_>("assignedStudentId").unwrap_or(None),
             "createdAt": rm.try_get::<chrono::DateTime<Utc>,_>("createdAt").map(|d| d.to_rfc3339()).unwrap_or_default(),
         }));
-        let inspector = sqlx::query("SELECT id,\"fullName\",email FROM \"User\" WHERE id=$1")
-            .bind(r.try_get::<String, _>("inspectorId").unwrap_or_default())
-            .fetch_optional(&state.db)
-            .await
-            .ok()
-            .flatten();
-        let inspector_json = inspector.map(|u| json!({"id": u.try_get::<String,_>("id").unwrap_or_default(), "fullName": u.try_get::<String,_>("fullName").unwrap_or_default(), "email": u.try_get::<String,_>("email").unwrap_or_default()}));
+    }
+    let mut inspectors_by_id: std::collections::HashMap<String, serde_json::Value> =
+        std::collections::HashMap::new();
+    for u in sqlx::query("SELECT id,\"fullName\",email FROM \"User\" WHERE id = ANY($1)")
+        .bind(&inspector_ids)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default()
+    {
+        let id: String = u.try_get("id").unwrap_or_default();
+        inspectors_by_id.insert(
+            id.clone(),
+            json!({
+                "id": id,
+                "fullName": u.try_get::<String,_>("fullName").unwrap_or_default(),
+                "email": u.try_get::<String,_>("email").unwrap_or_default(),
+            }),
+        );
+    }
+
+    let mut items = Vec::new();
+    for r in rows {
+        let iid: String = r.try_get("id")?;
+        let room_id: String = r.try_get("roomId").unwrap_or_default();
+        let inspector_id: String = r.try_get("inspectorId").unwrap_or_default();
+        let items_json = items_by_inspection.get(&iid).cloned().unwrap_or_default();
+        let room_json = rooms_by_id.get(&room_id).cloned();
+        let inspector_json = inspectors_by_id.get(&inspector_id).cloned();
         items.push(json!({
             "id": iid,
             "roomId": r.try_get::<String,_>("roomId").unwrap_or_default(),
@@ -218,6 +249,27 @@ async fn create(
     };
     if !can {
         return Err(AppError::Forbidden);
+    }
+    // Every unit must belong to the room being inspected.
+    let unit_ids: Vec<String> = input.items.iter().map(|it| it.unit_id.clone()).collect();
+    let matched_units =
+        sqlx::query("SELECT id FROM \"ComputerUnit\" WHERE \"roomId\"=$1 AND id = ANY($2)")
+            .bind(&input.room_id)
+            .bind(&unit_ids)
+            .fetch_all(&state.db)
+            .await?;
+    if matched_units.len() != unit_ids.len() {
+        return Err(AppError::BadRequest(
+            "Unit does not belong to this room".into(),
+        ));
+    }
+    // A photo key must be an upload owned by the caller, not another user's file.
+    for it in &input.items {
+        if let Some(key) = &it.photo_key {
+            if !key.starts_with(&format!("uploads/{}/", auth.0.sub)) {
+                return Err(AppError::BadRequest("Photo key is not yours.".into()));
+            }
+        }
     }
     // mandatory remarks check
     for it in &input.items {

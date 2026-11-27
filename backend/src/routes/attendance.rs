@@ -44,6 +44,19 @@ fn manila_tz() -> FixedOffset {
     FixedOffset::east_opt(8 * 3600).expect("UTC+8 is a valid fixed offset")
 }
 
+fn schedule_minutes(value: &str) -> i32 {
+    let mut parts = value.split(':');
+    let hours = parts
+        .next()
+        .and_then(|v| v.parse::<i32>().ok())
+        .unwrap_or(0);
+    let minutes = parts
+        .next()
+        .and_then(|v| v.parse::<i32>().ok())
+        .unwrap_or(0);
+    hours * 60 + minutes
+}
+
 /// Pre-OJT completion is derived live: approved credited hours and no unaccepted tasks.
 pub(crate) async fn is_pre_ojt_completed(
     db: &sqlx::PgPool,
@@ -61,6 +74,35 @@ pub(crate) async fn is_pre_ojt_completed(
     let hours: f64 = row.try_get("hours")?;
     let pending: bool = row.try_get("pending")?;
     Ok(hours >= required_hours && !pending)
+}
+
+/// One query for a whole page of students, instead of one query per row.
+pub(crate) async fn pre_ojt_completed_map(
+    db: &sqlx::PgPool,
+    student_ids: &[String],
+) -> Result<std::collections::HashMap<String, bool>> {
+    let mut result = std::collections::HashMap::new();
+    if student_ids.is_empty() {
+        return Ok(result);
+    }
+    let rows = sqlx::query(
+        "SELECT u.id, u.\"requiredHours\" AS required, \
+         COALESCE(SUM(a.\"creditedHours\") FILTER (WHERE a.status::text='APPROVED'),0) AS hours, \
+         EXISTS (SELECT 1 FROM \"TaskAssignment\" ta WHERE ta.\"studentId\"=u.id AND ta.status::text<>'ACCEPTED') AS pending \
+         FROM \"User\" u LEFT JOIN \"AttendanceLog\" a ON a.\"studentId\"=u.id \
+         WHERE u.id = ANY($1) GROUP BY u.id",
+    )
+    .bind(student_ids)
+    .fetch_all(db)
+    .await?;
+    for row in rows {
+        let id: String = row.try_get("id")?;
+        let required: f64 = row.try_get("required").unwrap_or(100.0);
+        let hours: f64 = row.try_get("hours").unwrap_or(0.0);
+        let pending: bool = row.try_get("pending").unwrap_or(false);
+        result.insert(id, hours >= required && !pending);
+    }
+    Ok(result)
 }
 
 fn normalize_pagination(page: Option<i64>, page_size: Option<i64>) -> (i64, i64, i64) {
@@ -417,20 +459,8 @@ async fn create(
         // evaluate schedule window in local (Asia/Manila) time
         let now_local = now.with_timezone(&manila_tz());
         let punch_minutes = now_local.hour() as i32 * 60 + now_local.minute() as i32;
-        let parse_tm = |s: &str| -> i32 {
-            let parts: Vec<&str> = s.split(':').collect();
-            let h = parts
-                .first()
-                .and_then(|x| x.parse::<i32>().ok())
-                .unwrap_or(0);
-            let m = parts
-                .get(1)
-                .and_then(|x| x.parse::<i32>().ok())
-                .unwrap_or(0);
-            h * 60 + m
-        };
-        let start_min = parse_tm(&start_time);
-        let end_min = parse_tm(&end_time);
+        let start_min = schedule_minutes(&start_time);
+        let end_min = schedule_minutes(&end_time);
         let (is_irregular, irregular_reason) = if punch_minutes < start_min - grace {
             (
                 true,
@@ -463,7 +493,7 @@ async fn create(
             .bind(&auth.0.sub)
             .bind(&batch_id)
             .bind(&sid)
-            .bind(shift_date_parsed.with_timezone(&Utc))
+            .bind(shift_day.and_hms_opt(0, 0, 0).unwrap())
             .bind(now)
             .bind(&key)
             .bind(is_irregular)
@@ -494,7 +524,7 @@ async fn create(
         let aid = attendance_id
             .ok_or_else(|| AppError::BadRequest("Attendance record is required.".into()))?;
         let mut tx = state.db.begin().await?;
-        let existing = sqlx::query("SELECT id,\"timeIn\"::timestamptz,\"timeOut\"::timestamptz FROM \"AttendanceLog\" WHERE id=$1 AND \"studentId\"=$2 FOR UPDATE")
+        let existing = sqlx::query("SELECT id,\"timeIn\"::timestamptz,\"timeOut\"::timestamptz,\"scheduleId\" FROM \"AttendanceLog\" WHERE id=$1 AND \"studentId\"=$2 FOR UPDATE")
             .bind(&aid).bind(&auth.0.sub).fetch_optional(&mut *tx).await?
             .ok_or(AppError::NotFound)?;
         let time_out_existing: Option<chrono::DateTime<Utc>> = existing.try_get("timeOut").ok();
@@ -510,15 +540,41 @@ async fn create(
             .map_err(|e| AppError::Internal(e.to_string()))?;
 
         let now = Utc::now();
-        let diff_ms = now.timestamp_millis() - time_in.timestamp_millis();
-        let recorded = if diff_ms <= 0 {
+        let raw_ms = now.timestamp_millis() - time_in.timestamp_millis();
+        let schedule_id: Option<String> = existing.try_get("scheduleId").unwrap_or(None);
+        let mut capped_ms = raw_ms;
+        let mut overlong_reason: Option<String> = None;
+        if let Some(sid) = schedule_id {
+            let sched = sqlx::query(
+                "SELECT \"startTime\",\"endTime\",\"graceMinutes\" FROM \"Schedule\" WHERE id=$1",
+            )
+            .bind(&sid)
+            .fetch_optional(&mut *tx)
+            .await?;
+            if let Some(sched) = sched {
+                let start_min = schedule_minutes(&sched.try_get::<String, _>("startTime")?);
+                let end_min = schedule_minutes(&sched.try_get::<String, _>("endTime")?);
+                let grace = sched.try_get::<i32, _>("graceMinutes").unwrap_or(0);
+                let now_local = now.with_timezone(&manila_tz());
+                let punch_minutes = now_local.hour() as i32 * 60 + now_local.minute() as i32;
+                if punch_minutes > end_min + grace {
+                    capped_ms =
+                        (end_min - start_min).max(0) as i64 * 60_000 + grace as i64 * 120_000;
+                    overlong_reason =
+                        Some("Time-Out outside schedule window; hours capped.".into());
+                }
+            }
+        }
+        let effective_ms = capped_ms.min(raw_ms);
+        let recorded = if effective_ms <= 0 {
             0.0
         } else {
-            (diff_ms as f64 / 3600000.0 * 100.0).round() / 100.0
+            (effective_ms as f64 / 3600000.0 * 100.0).round() / 100.0
         };
 
-        sqlx::query("UPDATE \"AttendanceLog\" SET \"timeOut\"=$1, \"photoOutKey\"=$2, \"recordedHours\"=$3, \"updatedAt\"=NOW() WHERE id=$4")
-            .bind(now).bind(&key).bind(recorded).bind(&aid).execute(&mut *tx).await?;
+        sqlx::query("UPDATE \"AttendanceLog\" SET \"timeOut\"=$1, \"photoOutKey\"=$2, \"recordedHours\"=$3, \"isIrregular\"=CASE WHEN $5::text IS NULL THEN \"isIrregular\" ELSE TRUE END, \"irregularReason\"=CASE WHEN $5::text IS NULL THEN \"irregularReason\" ELSE $5 END, \"updatedAt\"=NOW() WHERE id=$4")
+            .bind(now).bind(&key).bind(recorded).bind(&aid)
+            .bind(overlong_reason.as_deref()).execute(&mut *tx).await?;
         tx.commit().await?;
 
         let attendance = attendance_row(&state, &aid).await?;
@@ -943,5 +999,13 @@ mod tests {
     #[test]
     fn unknown_rule_defaults_exact() {
         assert_eq!(apply_credit_rounding("NOPE", 2.3456), 2.35);
+    }
+
+    #[test]
+    fn manila_shift_day_is_stored_as_local_midnight() {
+        let parsed = chrono::DateTime::parse_from_rfc3339("2026-11-26T16:30:00Z").unwrap();
+        let day = parsed.with_timezone(&super::manila_tz()).date_naive();
+        let stored = day.and_hms_opt(0, 0, 0).unwrap();
+        assert_eq!(stored.to_string(), "2026-11-27 00:00:00");
     }
 }

@@ -1,14 +1,11 @@
 import { headers } from "next/headers";
 import type { Role } from "@/lib/types";
 
-let warnedMissingRustUrl = false;
-
 export function getRustBackendUrl(): string {
   const configured = process.env.RUST_BACKEND_URL?.trim().replace(/\/$/, "");
   if (configured) return configured;
-  if (process.env.NODE_ENV === "production" && !warnedMissingRustUrl) {
-    warnedMissingRustUrl = true;
-    console.error("[techtracker-web] RUST_BACKEND_URL is unset in production; falling back to http://127.0.0.1:8080");
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("RUST_BACKEND_URL is required in production");
   }
   return "http://127.0.0.1:8080";
 }

@@ -19,7 +19,6 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::Row;
-use std::time::Duration;
 use uuid::Uuid;
 use validator::Validate;
 
@@ -258,7 +257,9 @@ async fn login(
         None => {
             if !state
                 .rate_limiter
-                .allow(&limit_key, 20, Duration::from_secs(60))
+                .allow(&state.db, &limit_key, 20, chrono::Duration::seconds(60))
+                .await
+                .unwrap_or(false)
             {
                 return (
                     StatusCode::TOO_MANY_REQUESTS,
@@ -292,7 +293,9 @@ async fn login(
         }
         if !state
             .rate_limiter
-            .allow(&limit_key, 20, Duration::from_secs(60))
+            .allow(&state.db, &limit_key, 20, chrono::Duration::seconds(60))
+            .await
+            .unwrap_or(false)
         {
             return (
                 StatusCode::TOO_MANY_REQUESTS,
@@ -428,7 +431,9 @@ async fn forgot_password(
     let limit_key = format!("forgot:{}:{}", client_ip(&headers), email);
     if !state
         .rate_limiter
-        .allow(&limit_key, 20, Duration::from_secs(60))
+        .allow(&state.db, &limit_key, 20, chrono::Duration::seconds(60))
+        .await
+        .unwrap_or(false)
     {
         return Err(AppError::BadRequest(
             "Too many password reset requests. Try again shortly.".into(),

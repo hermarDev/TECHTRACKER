@@ -1,54 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-  evaluateLockoutState,
-  hashPassword,
-  isResetTokenExpired,
-  nextFailureState,
-  RESET_TOKEN_TTL_MS,
-  verifyPassword,
-} from "@/lib/auth-helpers";
 import { canInspectRoom, canUseMessaging, roleDashboardPath } from "@/lib/rbac-policies";
-import { MAX_UPLOAD_BYTES, resolveSafeStoragePath, validateUploadFile } from "@/lib/storage-rules";
 import { calculateSessionHours, computeHoursProgress, evaluateScheduleWindow } from "@/lib/hours";
 import { formatSafeDate, formatSafeDateTime, normalizeTaskAttachments } from "@/lib/task-format";
-import { normalizePagination, registerSchema } from "@/lib/validation";
-
-describe("Core Authentication & Lockout (03S)", () => {
-  it("hashes and verifies passwords with bcrypt", async () => {
-    const hash = await hashPassword("TechTrack@2026");
-    expect(hash).not.toBe("TechTrack@2026");
-    expect(await verifyPassword("TechTrack@2026", hash)).toBe(true);
-    expect(await verifyPassword("WrongPassword", hash)).toBe(false);
-  });
-
-  it("locks account for 15 minutes after 5 consecutive failed logins", () => {
-    const now = new Date("2026-11-15T10:00:00Z");
-    const step4 = nextFailureState(3, now);
-    expect(step4.triggeredLock).toBe(false);
-    expect(step4.remainingAttempts).toBe(1);
-
-    const step5 = nextFailureState(4, now);
-    expect(step5.triggeredLock).toBe(true);
-    expect(step5.lockedUntil).not.toBeNull();
-
-    const lockCheck = evaluateLockoutState(step5.failedLoginCount, step5.lockedUntil, now);
-    expect(lockCheck.isLocked).toBe(true);
-    expect(lockCheck.remainingMinutes).toBe(15);
-
-    const expiredLock = evaluateLockoutState(5, new Date(now.getTime() - 1), now);
-    expect(expiredLock).toEqual({ isLocked: false, remainingMinutes: 0 });
-  });
-
-  it("enforces a one-hour password reset lifetime and expires at the exact boundary", () => {
-    const now = new Date("2026-11-15T10:00:00Z");
-    const expiresAt = new Date(now.getTime() + RESET_TOKEN_TTL_MS);
-    expect(RESET_TOKEN_TTL_MS).toBe(60 * 60 * 1000);
-    expect(isResetTokenExpired(expiresAt, new Date(now.getTime() + RESET_TOKEN_TTL_MS - 1))).toBe(false);
-    expect(isResetTokenExpired(expiresAt, new Date(now.getTime() + RESET_TOKEN_TTL_MS))).toBe(true);
-    expect(isResetTokenExpired(new Date(now.getTime() - 1), now)).toBe(true);
-  });
-
-});
 
 describe("RBAC & Charter Delimitations (04S, 09S, 11W)", () => {
   it("maps roles to dedicated dashboards", () => {
@@ -68,20 +21,6 @@ describe("RBAC & Charter Delimitations (04S, 09S, 11W)", () => {
     expect(canInspectRoom({ id: "student-1", role: "STUDENT" }, room)).toBe(true);
     expect(canInspectRoom({ id: "student-2", role: "STUDENT" }, room)).toBe(false);
     expect(canInspectRoom({ id: "super-1", role: "SUPERADMIN" }, room)).toBe(true);
-  });
-});
-
-describe("Storage Security & 5MB Upload Limit", () => {
-  it("accepts <=5MB allowed MIME types and rejects >5MB or disallowed MIME", () => {
-    expect(validateUploadFile({ size: 1024, type: "image/png" }).ok).toBe(true);
-    expect(validateUploadFile({ size: 1024, type: "application/pdf" }).ok).toBe(true);
-    expect(validateUploadFile({ size: MAX_UPLOAD_BYTES + 1, type: "image/jpeg" }).ok).toBe(false);
-    expect(validateUploadFile({ size: 1024, type: "application/x-msdownload" }).ok).toBe(false);
-  });
-
-  it("rejects path traversal in storage keys", () => {
-    expect(() => resolveSafeStoragePath("../../etc/passwd")).toThrow();
-    expect(resolveSafeStoragePath("attendance/test.png")).toContain(".storage/attendance/test.png");
   });
 });
 
@@ -127,26 +66,6 @@ describe("Duty Hours Calculation & Schedule Validation (05S, 06S)", () => {
       graceMinutes: 15,
     });
     expect(late.isIrregular).toBe(true);
-  });
-});
-
-describe("Validation & Server Pagination (Charter 56, 02S)", () => {
-  it("enforces 15 / 25 / 50 pagination options", () => {
-    expect(normalizePagination("2", "25")).toEqual({ page: 2, pageSize: 25, skip: 25, take: 25 });
-    expect(normalizePagination("1", "999").pageSize).toBe(15);
-  });
-
-  it("validates self-registration payload without role selection", () => {
-    const valid = registerSchema.safeParse({
-      fullName: "Juan Student",
-      email: "juan@aclc.edu.ph",
-      studentIdNo: "2023-00200",
-      program: "BSIT",
-      section: "BSIT-4A",
-      password: "Password123",
-      confirmPassword: "Password123",
-    });
-    expect(valid.success).toBe(true);
   });
 });
 

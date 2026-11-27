@@ -455,15 +455,19 @@ async fn students_list(
         .build()
         .fetch_all(&state.db)
         .await?;
+    let student_ids: Vec<String> = rows
+        .iter()
+        .map(|r| r.try_get::<String, _>("id").unwrap_or_default())
+        .collect();
+    let completed_map =
+        crate::routes::attendance::pre_ojt_completed_map(&state.db, &student_ids).await?;
     let mut items: Vec<serde_json::Value> = Vec::new();
     for r in rows {
         let batch_id: Option<String> = r.try_get("batchId").unwrap_or(None);
         let batch = batch_id.as_ref().map(|id| json!({"id": id, "name": r.try_get::<Option<String>,_>("batchName").unwrap_or(None), "section": r.try_get::<Option<String>,_>("batchSection").unwrap_or(None)}));
         let student_id: String = r.try_get("id")?;
         let required_hours: f64 = r.try_get("requiredHours").unwrap_or(100.0);
-        let completed =
-            crate::routes::attendance::is_pre_ojt_completed(&state.db, &student_id, required_hours)
-                .await?;
+        let completed = completed_map.get(&student_id).copied().unwrap_or(false);
         items.push(json!({
             "id": student_id,
             "email": r.try_get::<String,_>("email").unwrap_or_default(),

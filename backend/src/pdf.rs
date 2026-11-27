@@ -29,6 +29,26 @@ pub struct InspectionSummaryRow {
     pub inspector: String,
 }
 
+fn push_table_header(ops: &mut Vec<Op>, headers: &[&str], cols: &[f32], y: f32, size: f32) {
+    ops.push(Op::SaveGraphicsState);
+    ops.push(Op::StartTextSection);
+    for (i, header) in headers.iter().enumerate() {
+        ops.push(Op::SetTextCursor {
+            pos: Point::new(Mm(cols[i]), Mm(y)),
+        });
+        ops.push(Op::SetFont {
+            font: PdfFontHandle::Builtin(BuiltinFont::HelveticaBold),
+            size: Pt(size),
+        });
+        ops.push(Op::SetLineHeight { lh: Pt(size) });
+        ops.push(Op::ShowText {
+            items: vec![TextItem::Text(header.to_string())],
+        });
+    }
+    ops.push(Op::EndTextSection);
+    ops.push(Op::RestoreGraphicsState);
+}
+
 fn total_credited_hours(logs: &[AccreditationLog]) -> f64 {
     logs.iter().map(|l| l.credited_hours).sum()
 }
@@ -245,25 +265,9 @@ pub fn generate_operational_report_pdf(
 
     let cols = [14.0f32, 54.0, 94.0, 134.0, 174.0];
     let mut y = 266.0f32;
-    ops.push(Op::SaveGraphicsState);
-    ops.push(Op::StartTextSection);
-    for (i, h) in headers.iter().enumerate() {
-        ops.push(Op::SetTextCursor {
-            pos: Point::new(Mm(cols[i]), Mm(y)),
-        });
-        ops.push(Op::SetFont {
-            font: PdfFontHandle::Builtin(BuiltinFont::HelveticaBold),
-            size: Pt(8.0),
-        });
-        ops.push(Op::SetLineHeight { lh: Pt(8.0) });
-        ops.push(Op::ShowText {
-            items: vec![TextItem::Text(h.to_string())],
-        });
-    }
-    ops.push(Op::EndTextSection);
-    ops.push(Op::RestoreGraphicsState);
-
+    push_table_header(&mut ops, headers, &cols, y, 8.0);
     y -= 6.0;
+    let mut pages: Vec<PdfPage> = Vec::new();
     for row in rows {
         ops.push(Op::SaveGraphicsState);
         ops.push(Op::StartTextSection);
@@ -283,14 +287,17 @@ pub fn generate_operational_report_pdf(
         ops.push(Op::EndTextSection);
         ops.push(Op::RestoreGraphicsState);
         y -= 5.0;
-        if y < 20.0 {
-            break;
+        if y < 24.0 {
+            pages.push(PdfPage::new(Mm(210.0), Mm(297.0), ops));
+            ops = Vec::new();
+            push_table_header(&mut ops, headers, &cols, 266.0, 8.0);
+            y = 260.0;
         }
     }
 
-    let page = PdfPage::new(Mm(210.0), Mm(297.0), ops);
+    pages.push(PdfPage::new(Mm(210.0), Mm(297.0), ops));
     let mut doc = PdfDocument::new(title);
-    doc.pages.push(page);
+    doc.pages.extend(pages);
     let mut warnings = Vec::new();
     doc.save(&PdfSaveOptions::default(), &mut warnings)
 }
@@ -327,25 +334,10 @@ pub fn generate_inspection_pdf(rows: &[InspectionSummaryRow]) -> Vec<u8> {
         "Inspected",
         "Inspector",
     ];
-    ops.push(Op::SaveGraphicsState);
-    ops.push(Op::StartTextSection);
-    for (i, h) in headers.iter().enumerate() {
-        ops.push(Op::SetTextCursor {
-            pos: Point::new(Mm(cols[i]), Mm(header_y)),
-        });
-        ops.push(Op::SetFont {
-            font: PdfFontHandle::Builtin(BuiltinFont::HelveticaBold),
-            size: Pt(7.0),
-        });
-        ops.push(Op::SetLineHeight { lh: Pt(7.0) });
-        ops.push(Op::ShowText {
-            items: vec![TextItem::Text(h.to_string())],
-        });
-    }
-    ops.push(Op::EndTextSection);
-    ops.push(Op::RestoreGraphicsState);
+    push_table_header(&mut ops, &headers, &cols, header_y, 7.0);
 
     let mut y = header_y - 5.0;
+    let mut pages: Vec<PdfPage> = Vec::new();
     for row in rows {
         let cells = [
             row.room.clone(),
@@ -374,14 +366,17 @@ pub fn generate_inspection_pdf(rows: &[InspectionSummaryRow]) -> Vec<u8> {
         ops.push(Op::EndTextSection);
         ops.push(Op::RestoreGraphicsState);
         y -= 4.0;
-        if y < 20.0 {
-            break;
+        if y < 24.0 {
+            pages.push(PdfPage::new(Mm(210.0), Mm(297.0), ops));
+            ops = Vec::new();
+            push_table_header(&mut ops, &headers, &cols, header_y, 7.0);
+            y = header_y - 5.0;
         }
     }
 
-    let page = PdfPage::new(Mm(210.0), Mm(297.0), ops);
+    pages.push(PdfPage::new(Mm(210.0), Mm(297.0), ops));
     let mut doc = PdfDocument::new("Inspection");
-    doc.pages.push(page);
+    doc.pages.extend(pages);
     let mut warnings = Vec::new();
     doc.save(&PdfSaveOptions::default(), &mut warnings)
 }
@@ -415,6 +410,46 @@ mod tests {
             "expected multiple pages"
         );
         assert_eq!(total_credited_hours(&logs), 60.0);
+    }
+
+    #[test]
+    fn report_pdfs_spill_instead_of_dropping_rows() {
+        let headers = ["A", "B", "C", "D", "E"];
+        let rows: Vec<Vec<String>> = (0..200)
+            .map(|i| {
+                vec![
+                    i.to_string(),
+                    "x".into(),
+                    "y".into(),
+                    "z".into(),
+                    "w".into(),
+                ]
+            })
+            .collect();
+        let operational_pdf = generate_operational_report_pdf("Report", &headers, &rows);
+        let operational = String::from_utf8_lossy(&operational_pdf);
+        assert!(
+            operational.matches("/Type/Page").count() >= 4,
+            "operational PDF must use several pages"
+        );
+
+        let inspection_rows: Vec<InspectionSummaryRow> = (0..200)
+            .map(|i| InspectionSummaryRow {
+                room: format!("Room {i}"),
+                unit_code: format!("PC-{i}"),
+                condition: "FUNCTIONING".into(),
+                remarks: String::new(),
+                photo_key: None,
+                inspected_at: "2026-11-27 08:00".into(),
+                inspector: "Tester".into(),
+            })
+            .collect();
+        let inspection_pdf = generate_inspection_pdf(&inspection_rows);
+        let inspection = String::from_utf8_lossy(&inspection_pdf);
+        assert!(
+            inspection.matches("/Type/Page").count() >= 4,
+            "inspection PDF must use several pages"
+        );
     }
 
     #[test]

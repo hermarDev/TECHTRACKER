@@ -1,4 +1,6 @@
 import "dotenv/config";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -11,6 +13,10 @@ const BASE = process.env.RUST_BACKEND_URL ?? "http://127.0.0.1:8080";
 const RUN = Date.now().toString(36);
 const PASSWORD = "P1Regress@2026";
 const DEMO_PASSWORD = "TechTrack@2026";
+const PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64"
+);
 const prisma = new PrismaClient();
 let caseNumber = 0;
 
@@ -221,6 +227,155 @@ describe("P1 F12 review state guards", () => {
       cookie
     );
     expect(second.status).toBe(409);
+  });
+});
+
+describe("A4 long punch hours", () => {
+  it("caps and flags a time-out hours after the scheduled shift", async () => {
+    const student = await createVerifiedStudent("long-punch");
+    const batch = await prisma.batch.findFirstOrThrow({
+      where: { name: "BSIT-4A Batch 2026-1" },
+    });
+    await prisma.user.update({ where: { id: student.id }, data: { batchId: batch.id } });
+    const schedule = await prisma.schedule.findFirstOrThrow({
+      where: { batchId: batch.id, startTime: "08:00" },
+    });
+    const log = await prisma.attendanceLog.create({
+      data: {
+        studentId: student.id,
+        batchId: batch.id,
+        scheduleId: schedule.id,
+        shiftDate: new Date("2026-11-20T00:00:00Z"),
+        timeIn: new Date("2026-11-20T08:00:00Z"),
+        photoInKey: "attendance/a4.png",
+      },
+    });
+    const cookie = await login(student.email);
+    const form = new FormData();
+    form.set("action", "TIME_OUT");
+    form.set("attendanceId", log.id);
+    form.set("photo", new Blob([PNG], { type: "image/png" }), "out.png");
+    const res = await api("/api/attendance", { method: "POST", body: form }, cookie);
+    expect(res.status).toBe(200);
+    const stored = await prisma.attendanceLog.findUniqueOrThrow({ where: { id: log.id } });
+    expect(stored.recordedHours).toBeLessThanOrEqual(4.5);
+    expect(stored.isIrregular).toBe(true);
+  });
+});
+
+describe("A6 failed task submit leaves no file", () => {
+  it("rejects an accepted assignment before writing attachments", async () => {
+    const student = await createVerifiedStudent("orphan");
+    const admin = await prisma.user.findUniqueOrThrow({
+      where: { email: "coordinator@aclc-mandaue.edu.ph" },
+    });
+    const task = await prisma.task.create({
+      data: {
+        title: `A6 task ${RUN}`,
+        instructions: "Orphan check",
+        deadline: new Date("2026-12-31T00:00:00Z"),
+        createdById: admin.id,
+      },
+    });
+    await prisma.taskAssignment.create({
+      data: { taskId: task.id, studentId: student.id, status: "ACCEPTED" },
+    });
+    const dir = path.join(process.cwd(), ".storage", "tasks");
+    const before = await fs.readdir(dir).catch(() => []);
+    const cookie = await login(student.email);
+    const form = new FormData();
+    form.set("summary", "Late submission");
+    form.set("attachments", new Blob([PNG], { type: "image/png" }), "late.png");
+    const res = await api(
+      `/api/tasks/${task.id}/submit`,
+      { method: "POST", body: form },
+      cookie
+    );
+    expect(res.status).toBe(409);
+    const after = await fs.readdir(dir).catch(() => []);
+    expect(after.length).toBe(before.length);
+  });
+});
+
+describe("A12 inspection unit scope", () => {
+  it("rejects a unit from another room", async () => {
+    const student = await createVerifiedStudent("unit-scope");
+    const roomA = await prisma.labRoom.create({
+      data: { name: `A12-A ${RUN}`, building: "A12", assignedStudentId: student.id },
+    });
+    const roomB = await prisma.labRoom.create({
+      data: { name: `A12-B ${RUN}`, building: "A12", assignedStudentId: student.id },
+    });
+    const unitB = await prisma.computerUnit.create({
+      data: { roomId: roomB.id, unitCode: `A12-${RUN}` },
+    });
+    const cookie = await login(student.email);
+    const res = await api(
+      "/api/inspections",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          roomId: roomA.id,
+          items: [{ unitId: unitB.id, condition: "FUNCTIONING" }],
+        }),
+      },
+      cookie
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("A5 attachment ownership", () => {
+  it("rejects a message attachment key owned by another student", async () => {
+    const owner = await createVerifiedStudent("file-owner");
+    const stranger = await createVerifiedStudent("file-stranger");
+    const cookie = await login(stranger.email);
+    const res = await api(
+      "/api/messages",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          body: "Look at this",
+          attachmentKey: `uploads/${owner.id}/stolen.png`,
+        }),
+      },
+      cookie
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects an inspection photo key owned by another student", async () => {
+    const owner = await createVerifiedStudent("insp-owner");
+    const stranger = await createVerifiedStudent("insp-stranger");
+    const room = await prisma.labRoom.create({
+      data: {
+        name: `A5 Room ${RUN}`,
+        building: "A5",
+        assignedStudentId: stranger.id,
+      },
+    });
+    const unit = await prisma.computerUnit.create({
+      data: { roomId: room.id, unitCode: `A5-${RUN}` },
+    });
+    const cookie = await login(stranger.email);
+    const res = await api(
+      "/api/inspections",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          roomId: room.id,
+          items: [
+            {
+              unitId: unit.id,
+              condition: "FUNCTIONING",
+              photoKey: `uploads/${owner.id}/stolen.png`,
+            },
+          ],
+        }),
+      },
+      cookie
+    );
+    expect(res.status).toBe(400);
   });
 });
 

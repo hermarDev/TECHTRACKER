@@ -55,6 +55,7 @@ impl Config {
                     .filter(|v| !v.is_empty())
             })
             .unwrap_or_else(|| DEFAULT_APP_URL.to_string());
+        validate_production_app_url(&env, &app_url)?;
 
         Ok(Self {
             database_url,
@@ -76,9 +77,18 @@ fn validate_production(env: &str, jwt_secret: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn validate_production_app_url(env: &str, app_url: &str) -> anyhow::Result<()> {
+    if env == "production" && app_url == DEFAULT_APP_URL {
+        anyhow::bail!("APP_URL or NEXT_PUBLIC_APP_URL is required in production");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{validate_production, DEV_JWT_SECRET};
+    use super::{
+        validate_production, validate_production_app_url, DEFAULT_APP_URL, DEV_JWT_SECRET,
+    };
 
     #[test]
     fn production_rejects_dev_or_short_secrets() {
@@ -90,5 +100,14 @@ mod tests {
     #[test]
     fn development_accepts_dev_secret() {
         assert!(validate_production("development", DEV_JWT_SECRET).is_ok());
+    }
+
+    #[test]
+    fn production_requires_an_explicit_app_url() {
+        assert!(validate_production_app_url("production", DEFAULT_APP_URL).is_err());
+        assert!(
+            validate_production_app_url("production", "https://tracker.example.edu.ph").is_ok()
+        );
+        assert!(validate_production_app_url("development", DEFAULT_APP_URL).is_ok());
     }
 }

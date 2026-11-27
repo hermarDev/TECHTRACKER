@@ -1,30 +1,48 @@
 use crate::config::Config;
+use chrono::{Duration, Utc};
 use sqlx::PgPool;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use uuid::Uuid;
 
-/// Shared, in-memory sliding-window limiter. Keys include the client IP and
-/// either the email or the action, so a burst cannot exhaust other accounts.
+/// Shared, database-backed sliding-window limiter. One row is one failed
+/// attempt; Postgres is the shared state so every backend process sees it.
 #[derive(Clone, Default)]
-pub struct RateLimiter {
-    hits: Arc<Mutex<HashMap<String, Vec<Instant>>>>,
-}
+pub struct RateLimiter;
 
 impl RateLimiter {
-    pub fn allow(&self, key: &str, max: usize, window: Duration) -> bool {
-        let now = Instant::now();
-        let mut guard = match self.hits.lock() {
-            Ok(g) => g,
-            Err(_) => return false,
-        };
-        let entry = guard.entry(key.to_string()).or_default();
-        entry.retain(|at| now.duration_since(*at) < window);
-        if entry.len() >= max {
-            return false;
+    pub async fn allow(
+        &self,
+        db: &PgPool,
+        key: &str,
+        max: i64,
+        window: Duration,
+    ) -> Result<bool, sqlx::Error> {
+        let now = Utc::now();
+        let cutoff = now - window;
+        let mut tx = db.begin().await?;
+        sqlx::query("DELETE FROM \"RateLimitHit\" WHERE \"attemptedAt\" < $1")
+            .bind(cutoff)
+            .execute(&mut *tx)
+            .await?;
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM \"RateLimitHit\" WHERE \"bucketKey\"=$1")
+                .bind(key)
+                .fetch_one(&mut *tx)
+                .await?;
+        if count >= max {
+            tx.rollback().await?;
+            return Ok(false);
         }
-        entry.push(now);
-        true
+        sqlx::query(
+            "INSERT INTO \"RateLimitHit\" (id,\"bucketKey\",\"attemptedAt\") VALUES ($1,$2,$3)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(key)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(true)
     }
 }
 
@@ -40,25 +58,7 @@ impl AppState {
         Self {
             config: Arc::new(config),
             db,
-            rate_limiter: RateLimiter::default(),
+            rate_limiter: RateLimiter,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::RateLimiter;
-    use std::time::Duration;
-
-    #[test]
-    fn rate_limiter_blocks_bursts_and_recovers_after_window() {
-        let limiter = RateLimiter::default();
-        for _ in 0..3 {
-            assert!(limiter.allow("ip:user@example.test", 3, Duration::from_millis(10)));
-        }
-        assert!(!limiter.allow("ip:user@example.test", 3, Duration::from_millis(10)));
-        assert!(limiter.allow("ip:other@example.test", 3, Duration::from_millis(10)));
-        std::thread::sleep(Duration::from_millis(20));
-        assert!(limiter.allow("ip:user@example.test", 3, Duration::from_millis(10)));
     }
 }

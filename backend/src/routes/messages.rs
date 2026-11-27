@@ -18,6 +18,13 @@ fn can_msg(role: &str) -> bool {
     role == "STUDENT" || role == "ADMIN"
 }
 
+/// An attachment must be an upload owned by the caller. This stops a user
+/// from referencing someone else's unattached file and then reading it back.
+fn owns_attachment_key(user_id: &str, key: Option<&String>) -> bool {
+    key.map(|key| key.starts_with(&format!("uploads/{user_id}/")))
+        .unwrap_or(true)
+}
+
 #[derive(Deserialize, Default)]
 struct MsgSendInput {
     #[serde(rename = "conversationId")]
@@ -85,31 +92,41 @@ async fn list(
         .unwrap_or(0);
     let convs = sqlx::query("SELECT id,title,type::text,\"batchId\",\"createdAt\"::timestamptz,\"updatedAt\"::timestamptz FROM \"Conversation\" WHERE id IN (SELECT \"conversationId\" FROM \"ConversationMember\" WHERE \"userId\"=$1) ORDER BY \"updatedAt\"::timestamptz DESC LIMIT $2 OFFSET $3")
         .bind(&auth.0.sub).bind(page_size).bind(skip).fetch_all(&state.db).await?;
-    let mut out = Vec::new();
-    for c in convs {
-        let cid: String = c.try_get("id")?;
-        let members = sqlx::query("SELECT cm.id,cm.\"conversationId\",cm.\"userId\",cm.\"joinedAt\"::timestamptz,u.\"fullName\",u.email,u.role::text FROM \"ConversationMember\" cm JOIN \"User\" u ON cm.\"userId\"=u.id WHERE cm.\"conversationId\"=$1")
-            .bind(&cid).fetch_all(&state.db).await.unwrap_or_default();
-        let members_json: Vec<serde_json::Value> = members
-            .into_iter()
-            .map(|m| {
-                json!({
-                    "id": m.try_get::<String,_>("id").unwrap_or_default(),
-                    "conversationId": m.try_get::<String,_>("conversationId").unwrap_or_default(),
-                    "userId": m.try_get::<String,_>("userId").unwrap_or_default(),
-                    "joinedAt": m.try_get::<chrono::DateTime<Utc>,_>("joinedAt").map(|d| d.to_rfc3339()).unwrap_or_default(),
-                    "user": {
-                        "id": m.try_get::<String,_>("userId").unwrap_or_default(),
-                        "fullName": m.try_get::<String,_>("fullName").unwrap_or_default(),
-                        "email": m.try_get::<String,_>("email").unwrap_or_default(),
-                        "role": m.try_get::<String,_>("role").unwrap_or_default(),
-                    }
-                })
-            })
-            .collect();
-        let msgs = sqlx::query("SELECT id,\"conversationId\",\"senderId\",body,\"attachmentKey\",\"attachmentName\",\"attachmentMime\",\"attachmentSize\",\"createdAt\"::timestamptz FROM \"Message\" WHERE \"conversationId\"=$1 ORDER BY \"createdAt\"::timestamptz DESC LIMIT 50")
-            .bind(&cid).fetch_all(&state.db).await.unwrap_or_default();
-        let msgs_json: Vec<serde_json::Value> = msgs.into_iter().map(|m| json!({
+    let conv_ids: Vec<String> = convs
+        .iter()
+        .map(|c| c.try_get::<String, _>("id").unwrap_or_default())
+        .collect();
+    let batch_ids: Vec<String> = convs
+        .iter()
+        .filter_map(|c| c.try_get::<Option<String>, _>("batchId").ok().flatten())
+        .collect();
+
+    let mut members_by_conv: std::collections::HashMap<String, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
+    for m in sqlx::query("SELECT cm.id,cm.\"conversationId\",cm.\"userId\",cm.\"joinedAt\"::timestamptz,u.\"fullName\",u.email,u.role::text FROM \"ConversationMember\" cm JOIN \"User\" u ON cm.\"userId\"=u.id WHERE cm.\"conversationId\" = ANY($1)")
+        .bind(&conv_ids).fetch_all(&state.db).await.unwrap_or_default()
+    {
+        let cid: String = m.try_get("conversationId").unwrap_or_default();
+        members_by_conv.entry(cid).or_default().push(json!({
+            "id": m.try_get::<String,_>("id").unwrap_or_default(),
+            "conversationId": m.try_get::<String,_>("conversationId").unwrap_or_default(),
+            "userId": m.try_get::<String,_>("userId").unwrap_or_default(),
+            "joinedAt": m.try_get::<chrono::DateTime<Utc>,_>("joinedAt").map(|d| d.to_rfc3339()).unwrap_or_default(),
+            "user": {
+                "id": m.try_get::<String,_>("userId").unwrap_or_default(),
+                "fullName": m.try_get::<String,_>("fullName").unwrap_or_default(),
+                "email": m.try_get::<String,_>("email").unwrap_or_default(),
+                "role": m.try_get::<String,_>("role").unwrap_or_default(),
+            }
+        }));
+    }
+    let mut messages_by_conv: std::collections::HashMap<String, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
+    for m in sqlx::query("SELECT id,\"conversationId\",\"senderId\",body,\"attachmentKey\",\"attachmentName\",\"attachmentMime\",\"attachmentSize\",\"createdAt\"::timestamptz FROM (SELECT id,\"conversationId\",\"senderId\",body,\"attachmentKey\",\"attachmentName\",\"attachmentMime\",\"attachmentSize\",\"createdAt\", ROW_NUMBER() OVER (PARTITION BY \"conversationId\" ORDER BY \"createdAt\" DESC) AS rn FROM \"Message\" WHERE \"conversationId\" = ANY($1)) ranked WHERE rn <= 50 ORDER BY \"conversationId\", \"createdAt\" DESC")
+        .bind(&conv_ids).fetch_all(&state.db).await.unwrap_or_default()
+    {
+        let cid: String = m.try_get("conversationId").unwrap_or_default();
+        messages_by_conv.entry(cid).or_default().push(json!({
             "id": m.try_get::<String,_>("id").unwrap_or_default(),
             "conversationId": m.try_get::<String,_>("conversationId").unwrap_or_default(),
             "senderId": m.try_get::<String,_>("senderId").unwrap_or_default(),
@@ -119,20 +136,36 @@ async fn list(
             "attachmentMime": m.try_get::<Option<String>,_>("attachmentMime").unwrap_or(None),
             "attachmentSize": m.try_get::<Option<i32>,_>("attachmentSize").unwrap_or(None),
             "createdAt": m.try_get::<chrono::DateTime<Utc>,_>("createdAt").map(|d| d.to_rfc3339()).unwrap_or_default(),
-        })).collect();
-        // batch info
+        }));
+    }
+    let mut batches_by_id: std::collections::HashMap<String, serde_json::Value> =
+        std::collections::HashMap::new();
+    for b in sqlx::query("SELECT id,name,section FROM \"Batch\" WHERE id = ANY($1)")
+        .bind(&batch_ids)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default()
+    {
+        let id: String = b.try_get("id").unwrap_or_default();
+        batches_by_id.insert(
+            id.clone(),
+            json!({
+                "id": id,
+                "name": b.try_get::<String,_>("name").unwrap_or_default(),
+                "section": b.try_get::<String,_>("section").unwrap_or_default(),
+            }),
+        );
+    }
+
+    let mut out = Vec::new();
+    for c in convs {
+        let cid: String = c.try_get("id")?;
+        let members_json = members_by_conv.get(&cid).cloned().unwrap_or_default();
+        let msgs_json = messages_by_conv.get(&cid).cloned().unwrap_or_default();
         let batch_id: Option<String> = c.try_get("batchId").ok();
-        let batch_json = if let Some(bid) = &batch_id {
-            let b = sqlx::query("SELECT id,name,section FROM \"Batch\" WHERE id=$1")
-                .bind(bid)
-                .fetch_optional(&state.db)
-                .await
-                .ok()
-                .flatten();
-            b.map(|r| json!({"id": r.try_get::<String,_>("id").unwrap_or_default(), "name": r.try_get::<String,_>("name").unwrap_or_default(), "section": r.try_get::<String,_>("section").unwrap_or_default()}))
-        } else {
-            None
-        };
+        let batch_json = batch_id
+            .as_ref()
+            .and_then(|bid| batches_by_id.get(bid).cloned());
         out.push(json!({
             "id": cid,
             "title": c.try_get::<Option<String>,_>("title").unwrap_or(None),
@@ -162,6 +195,9 @@ async fn create_or_send(
         serde_json::from_value(body).map_err(|_| AppError::BadRequest("Invalid input".into()))?;
     if input.body.is_empty() {
         return Err(AppError::BadRequest("Message body is required".into()));
+    }
+    if !owns_attachment_key(&auth.0.sub, input.attachment_key.as_ref()) {
+        return Err(AppError::BadRequest("Attachment key is not yours.".into()));
     }
 
     // existing conversation
@@ -228,6 +264,7 @@ async fn create_or_send(
         )
     })?;
     let conv_id = Uuid::new_v4().to_string();
+    let mut tx = state.db.begin().await?;
     if ctype == "BATCH" {
         let bid = input
             .batch_id
@@ -248,7 +285,6 @@ async fn create_or_send(
             .fetch_all(&state.db)
             .await
             .unwrap_or_default();
-        let mut tx = state.db.begin().await?;
         sqlx::query("INSERT INTO \"Conversation\" (id,type,\"batchId\",\"createdAt\",\"updatedAt\") VALUES ($1,'BATCH',$2,NOW(),NOW())")
             .bind(&conv_id).bind(&bid).execute(&mut *tx).await?;
         // members: coordinator + students
@@ -262,7 +298,6 @@ async fn create_or_send(
             sqlx::query("INSERT INTO \"ConversationMember\" (id,\"conversationId\",\"userId\",\"joinedAt\") VALUES ($1,$2,$3,NOW()) ON CONFLICT DO NOTHING")
                 .bind(Uuid::new_v4().to_string()).bind(&conv_id).bind(&sid).execute(&mut *tx).await?;
         }
-        tx.commit().await?;
     } else if ctype == "DIRECT" {
         let rids = input.recipient_ids.clone().ok_or_else(|| {
             AppError::BadRequest("recipientIds is required for DIRECT type".into())
@@ -280,7 +315,6 @@ async fn create_or_send(
                 return Err(AppError::NotFound);
             }
         }
-        let mut tx = state.db.begin().await?;
         sqlx::query("INSERT INTO \"Conversation\" (id,type,\"createdAt\",\"updatedAt\") VALUES ($1,'DIRECT',NOW(),NOW())")
             .bind(&conv_id).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO \"ConversationMember\" (id,\"conversationId\",\"userId\",\"joinedAt\") VALUES ($1,$2,$3,NOW())")
@@ -289,7 +323,6 @@ async fn create_or_send(
             sqlx::query("INSERT INTO \"ConversationMember\" (id,\"conversationId\",\"userId\",\"joinedAt\") VALUES ($1,$2,$3,NOW()) ON CONFLICT DO NOTHING")
                 .bind(Uuid::new_v4().to_string()).bind(&conv_id).bind(rid).execute(&mut *tx).await?;
         }
-        tx.commit().await?;
     } else {
         return Err(AppError::BadRequest("Invalid type".into()));
     }
@@ -300,11 +333,12 @@ async fn create_or_send(
         .bind(&mid).bind(&conv_id).bind(&auth.0.sub).bind(&input.body)
         .bind(input.attachment_key.as_deref()).bind(input.attachment_name.as_deref())
         .bind(input.attachment_mime.as_deref()).bind(input.attachment_size.map(|x| x as i32))
-        .execute(&state.db).await?;
+        .execute(&mut *tx).await?;
     sqlx::query("UPDATE \"Conversation\" SET \"updatedAt\"=NOW() WHERE id=$1")
         .bind(&conv_id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     write_audit_log(
         &state,
         Some(&auth.0.sub),
@@ -363,6 +397,9 @@ async fn send_to_conv(
         serde_json::from_value(body).map_err(|_| AppError::BadRequest("Invalid input".into()))?;
     if b.body.is_empty() {
         return Err(AppError::BadRequest("Message body is required".into()));
+    }
+    if !owns_attachment_key(&auth.0.sub, b.attachment_key.as_ref()) {
+        return Err(AppError::BadRequest("Attachment key is not yours.".into()));
     }
     let exists = sqlx::query("SELECT id FROM \"Conversation\" WHERE id=$1")
         .bind(&conv_id)

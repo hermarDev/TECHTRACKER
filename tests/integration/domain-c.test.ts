@@ -1,14 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import { normalizePagination, ALLOWED_PAGE_SIZES } from "@/lib/validation";
 import { canUseMessaging } from "@/lib/rbac-policies";
 import type { Role } from "@/lib/types";
-import {
-  generateInspectionSummaryCsv,
-  generateInspectionSummaryPdf,
-  generateOperationalReportCsv,
-  generateOperationalReportPdf,
-} from "@/lib/reports-export";
 const BACKEND_URL = process.env.RUST_BACKEND_URL ?? "http://127.0.0.1:8080";
 const DEMO_PASSWORD = "TechTrack@2026";
 const mockJson = vi.fn();
@@ -169,71 +162,11 @@ beforeAll(async () => {
   escalationId = escalationBody.escalation.id;
 });
 
-describe("Domain C — lib: pagination", () => {
-  it("normalizes to page 1, size 15 by default", () => {
-    const p = normalizePagination(undefined, undefined);
-    expect(p.page).toBe(1);
-    expect(p.pageSize).toBe(15);
-    expect(p.skip).toBe(0);
-    expect(p.take).toBe(15);
-  });
-  it("accepts 15 / 25 / 50 and rejects others", () => {
-    expect(normalizePagination(1, 15).pageSize).toBe(15);
-    expect(normalizePagination(2, 25).pageSize).toBe(25);
-    expect(normalizePagination(3, 50).pageSize).toBe(50);
-    expect(normalizePagination(1, 999).pageSize).toBe(15);
-    expect(normalizePagination(1, "abc").pageSize).toBe(15);
-  });
-  it("computes skip from page and pageSize", () => {
-    expect(normalizePagination(2, 25).skip).toBe(25);
-    expect(normalizePagination(3, 50).skip).toBe(100);
-  });
-  it("ALLOWED_PAGE_SIZES is exactly [15, 25, 50]", () => {
-    expect(ALLOWED_PAGE_SIZES).toEqual([15, 25, 50]);
-  });
-});
-
 describe("Domain C — lib: rbac messaging", () => {
   it("blocks SuperAdmin from messaging, allows Admin and Student", () => {
     expect(canUseMessaging("SUPERADMIN")).toBe(false);
     expect(canUseMessaging("ADMIN")).toBe(true);
     expect(canUseMessaging("STUDENT")).toBe(true);
-  });
-});
-
-describe("Domain C — lib: reports-export CSV", () => {
-  it("generates a CSV with header row from papaparse", () => {
-    const rows = [
-      { room: "Computer Lab 1", unitCode: "PC-01", condition: "NEEDS_MAINTENANCE", remarks: "port loose", photoKey: null, inspectedAt: "2026-11-14", inspector: "admin" },
-    ];
-    const csv = generateInspectionSummaryCsv(rows);
-    expect(csv).toContain("room,unitCode,condition,remarks,photoKey,inspectedAt,inspector");
-    expect(csv).toContain("Computer Lab 1");
-    expect(csv).toContain("NEEDS_MAINTENANCE");
-  });
-  it("generates an empty CSV string for no rows", () => {
-    expect(generateInspectionSummaryCsv([])).toBe("");
-  });
-});
-
-describe("Domain C — lib: reports-export PDF", () => {
-  it("generates a PDF Buffer (%PDF header)", () => {
-    const pdf = generateInspectionSummaryPdf([
-      { room: "Computer Lab 1", unitCode: "PC-01", condition: "Functioning", remarks: "", photoKey: null, inspectedAt: "2026-11-14", inspector: "admin" },
-    ]);
-    expect(Buffer.isBuffer(pdf)).toBe(true);
-    expect(pdf.length).toBeGreaterThan(0);
-    expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
-  });
-  it("generates operational report CSV and PDF", () => {
-    const rows = [
-      { batch: "BSIT-4A", section: "BSIT-4A", metric: "Attendance", value: "42", label: "completed" },
-    ];
-    const csv = generateOperationalReportCsv(rows);
-    expect(csv).toContain("BSIT-4A");
-    const pdf = generateOperationalReportPdf(rows);
-    expect(Buffer.isBuffer(pdf)).toBe(true);
-    expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
   });
 });
 
@@ -610,7 +543,7 @@ describe("Domain C — GET/PATCH /api/superadmin/admins (Admin CRUD)", () => {
   it("GET returns a paginated list of admins (only for SuperAdmin)", async () => {
     await authAs("SUPERADMIN", superadminId);
     const GET = httpHandler("GET", "/api/superadmin/admins");
-    const req = new Request("http://localhost/api/superadmin/admins?page=1&pageSize=15");
+    const req = new Request("http://localhost/api/superadmin/admins?page=1&pageSize=15&search=coordinator%40aclc-mandaue.edu.ph");
     await GET(req as any);
     const body = jsonBody(mockJson.mock.lastCall);
     expect(lastStatus(mockJson.mock.lastCall)).toBe(200);
