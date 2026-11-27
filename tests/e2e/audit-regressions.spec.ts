@@ -8,6 +8,23 @@ async function login(page: Page, email: string, destination: string) {
   await expect(page).toHaveURL(new RegExp(`${destination}$`));
 }
 
+test("stale attendance schedule drafts are cleared when schedules load", async ({ page }) => {
+  await login(page, "edrich.bardilas@student.aclc.edu.ph", "/student");
+  await page.evaluate(() => {
+    localStorage.setItem(
+      "techtracker-attendance-draft",
+      JSON.stringify({ scheduleId: "stale-schedule-id", shiftDate: "2026-11-27" })
+    );
+  });
+  await page.goto("/attendance");
+  await expect(page.getByText("Scheduled shift unavailable")).toHaveCount(0);
+  await expect(page.getByText("Select a scheduled shift", { exact: true })).toBeVisible();
+  const draft = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("techtracker-attendance-draft") ?? "{}")
+  );
+  expect(draft.scheduleId).toBe("");
+});
+
 test("task assignment dialog loads its roster and preserves a draft when closed", async ({ page }) => {
   await login(page, "coordinator@aclc-mandaue.edu.ph", "/admin");
   await page.goto("/admin/tasks");

@@ -46,6 +46,16 @@ export default function AttendancePage() {
   
   const form = useDraftForm("techtracker-attendance-draft", { scheduleId: "", shiftDate: "" });
 
+  // A restored draft can point at a schedule removed by a later seed or deploy.
+  const draftScheduleId = form.values.scheduleId;
+  const setDraftValues = form.setValues;
+  React.useEffect(() => {
+    if (schedules.length === 0 || !draftScheduleId) return;
+    if (!schedules.some((schedule) => schedule.id === draftScheduleId)) {
+      setDraftValues((prev) => ({ ...prev, scheduleId: "" }));
+    }
+  }, [schedules, draftScheduleId, setDraftValues]);
+
   const load = React.useCallback(async () => {
     setIsLoading(true);
     try {
