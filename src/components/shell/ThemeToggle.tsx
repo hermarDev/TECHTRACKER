@@ -72,10 +72,10 @@ export function ThemeToggle() {
 
   return (
     <div className="inline-flex items-center gap-0.5 rounded-lg border border-border bg-card p-0.5" role="group" aria-label="Theme preference">
-      <Button type="button" variant="ghost" size="icon" className="size-10 sm:size-9" aria-label="Toggle light or dark theme" onClick={() => setPref(document.documentElement.classList.contains("dark") ? "light" : "dark")}>
+      <Button type="button" variant="ghost" size="icon" className="min-w-8 size-8 sm:min-w-9 sm:size-9" aria-label="Toggle light or dark theme" onClick={() => setPref(document.documentElement.classList.contains("dark") ? "light" : "dark")}>
         <Moon className="size-4" aria-hidden="true" />
       </Button>
-      <Button type="button" variant={pref === "system" ? "secondary" : "ghost"} size="icon" className="size-10 sm:size-9" aria-label="Use system theme" aria-pressed={pref === "system"} onClick={() => setPref("system")}>
+      <Button type="button" variant={pref === "system" ? "secondary" : "ghost"} size="icon" className="min-w-8 size-8 sm:min-w-9 sm:size-9" aria-label="Use system theme" aria-pressed={pref === "system"} onClick={() => setPref("system")}>
         <Monitor className="size-4" aria-hidden="true" />
       </Button>
     </div>

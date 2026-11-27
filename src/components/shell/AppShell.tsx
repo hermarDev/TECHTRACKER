@@ -229,7 +229,7 @@ export function AppShell({
             <span aria-hidden="true">/</span>
             <span className="truncate">{title}</span>
           </div>
-          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 [&_button]:max-w-full [&_button]:whitespace-normal">
+          <div className="flex min-w-0 max-w-full flex-nowrap items-center gap-2 [&_button]:max-w-full [&_button]:whitespace-normal">
             <Link
               href="/notifications"
               aria-label={`Notifications (${unread} unread)`}

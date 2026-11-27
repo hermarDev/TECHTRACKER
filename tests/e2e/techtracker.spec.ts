@@ -438,6 +438,40 @@ test("SuperAdmin tabs render and chat remains forbidden", async ({ page }) => {
   await assertNoHorizontalOverflow(page, "/messages");
 });
 
+test("mobile header actions stay inside the sticky header and toasts sit below it", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await loginAs(page, SUPERADMIN_EMAIL, "/superadmin");
+  await expect(page.locator("header").first()).toBeVisible();
+  await expect(page.getByText("Signed in successfully.")).toBeVisible();
+
+  const geometry = await page.evaluate(() => {
+    const header = document.querySelector("header");
+    if (!header) return null;
+    const box = header.getBoundingClientRect();
+    const bell = document.querySelector('a[aria-label^="Notifications"]');
+    const theme = document.querySelector('[role="group"][aria-label="Theme preference"]');
+    const toast = document.querySelector("[data-sonner-toaster]");
+    const rect = (el: Element | null) => {
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
+    };
+    return {
+      header: { top: box.top, bottom: box.bottom },
+      bell: rect(bell),
+      theme: rect(theme),
+      toast: rect(toast),
+    };
+  });
+
+  expect(geometry).not.toBeNull();
+  expect(geometry!.bell).not.toBeNull();
+  expect(geometry!.theme).not.toBeNull();
+  expect(geometry!.bell!.top).toBeGreaterThanOrEqual(geometry!.header.top);
+  expect(geometry!.theme!.bottom).toBeLessThanOrEqual(geometry!.header.bottom + 1);
+  expect(geometry!.toast!.top).toBeGreaterThanOrEqual(geometry!.header.bottom);
+});
+
 test("role-specific responsive pages do not overflow horizontally", async ({ page }) => {
   await visit(page, "/");
   await assertNoHorizontalOverflow(page, "/");

@@ -203,4 +203,5 @@
 [data-sonner-toaster] {
   width: calc(100vw - 2rem) !important;
   max-width: calc(100vw - 2rem) !important;
+  --mobile-offset-top: 4.5rem !important;
 }

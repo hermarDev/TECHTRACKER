@@ -45,7 +45,7 @@ export default function RootLayout({
       </head>
       <body className="min-h-full flex flex-col bg-background text-foreground">
         {children}
-        <Toaster position="top-center" richColors closeButton />
+        <Toaster position="top-center" offset={{ top: 72 }} richColors closeButton />
       </body>
     </html>
   );
