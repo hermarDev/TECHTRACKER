@@ -197,7 +197,24 @@
 }
 
 /* Floating fields inherit the surface on which their labels sit. */
+[data-slot="card"] { --field-surface: var(--card); }
 [data-slot="dialog-content"] { --field-surface: var(--popover); }
+
+/* Keep browser-autofilled inputs aligned with the surrounding field surface in light and dark mode. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-text-fill-color: var(--foreground);
+  -webkit-box-shadow: 0 0 0 1000px var(--field-surface, var(--card)) inset;
+  box-shadow: 0 0 0 1000px var(--field-surface, var(--card)) inset;
+  caret-color: var(--foreground);
+  transition: background-color 9999s ease-in-out 0s;
+}
+input:-webkit-autofill:focus-visible {
+  -webkit-box-shadow: 0 0 0 1000px var(--field-surface, var(--card)) inset, 0 0 0 3px color-mix(in oklch, var(--ring) 50%, transparent);
+  box-shadow: 0 0 0 1000px var(--field-surface, var(--card)) inset, 0 0 0 3px color-mix(in oklch, var(--ring) 50%, transparent);
+}
 
 /* Toasts must stay inside narrow phone viewports. */
 [data-sonner-toaster] {

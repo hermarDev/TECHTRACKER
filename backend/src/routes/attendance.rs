@@ -209,13 +209,17 @@ async fn list(
                 .replace('_', "!_")
         );
         count_query
-            .push(" AND u.\"fullName\" ILIKE ")
+            .push(" AND (u.\"fullName\" ILIKE ")
             .push_bind(pattern.clone())
-            .push(" ESCAPE '!' ");
+            .push(" ESCAPE '!' OR u.\"studentIdNo\" ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" ESCAPE '!') ");
         data_query
-            .push(" AND u.\"fullName\" ILIKE ")
+            .push(" AND (u.\"fullName\" ILIKE ")
             .push_bind(pattern.clone())
-            .push(" ESCAPE '!' ");
+            .push(" ESCAPE '!' OR u.\"studentIdNo\" ILIKE ")
+            .push_bind(pattern.clone())
+            .push(" ESCAPE '!') ");
     }
     if let Some(s) = &status {
         count_query.push(" AND a.status::text = ").push_bind(s);

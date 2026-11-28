@@ -274,7 +274,7 @@ export function AppShell({
       {/* Mobile Bottom Navigation */}
       <nav
         aria-label="Mobile navigation"
-        className="fixed inset-x-0 bottom-0 z-40 flex h-16 items-center justify-around border-t border-border bg-card/95 px-2 pb-[env(safe-area-inset-bottom)] lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 flex h-16 items-center justify-around border-t border-border bg-card px-2 pb-[env(safe-area-inset-bottom)] lg:hidden"
       >
         {mobilePrimary.map((item) => {
           const Icon = item.icon;

@@ -163,7 +163,7 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<{ ok: bool
 // Subsystem 1 — Admin CRUD / Toggle
 // ============================================================================
 
-function AdminsPanel() {
+function AdminsPanel({ onMutate }: { onMutate?: () => void }) {
   const [rows, setRows] = React.useState<AdminRow[]>([]);
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(15);
@@ -231,6 +231,7 @@ function AdminsPanel() {
     setCreateOpen(false);
     setCreateDraft({ fullName: "", email: "", password: "", phone: "" });
     void load(page, pageSize);
+    onMutate?.();
   };
 
   const saveEdit = async () => {
@@ -274,6 +275,7 @@ function AdminsPanel() {
     }
     toast.success(`${admin.fullName} is now ${next === "ACTIVE" ? "active" : "deactivated"}.`);
     void load(page, pageSize);
+    onMutate?.();
   };
 
   return (
@@ -737,7 +739,7 @@ const RULING_STATUS_LABELS = {
   DISMISSED: "Dismissed",
 } as const;
 
-function EscalationsPanel() {
+function EscalationsPanel({ onMutate }: { onMutate?: () => void }) {
   const [rows, setRows] = React.useState<EscalationRow[]>([]);
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(15);
@@ -796,6 +798,7 @@ function EscalationsPanel() {
     setRuling(null);
     setRulingNote("");
     void load(page, pageSize);
+    onMutate?.();
   };
 
   return (
@@ -1015,12 +1018,14 @@ function AuditPanel() {
   const [pageSize, setPageSize] = React.useState(15);
   const [total, setTotal] = React.useState(0);
   const [search, setSearch] = React.useState("");
+  const [actionFilter, setActionFilter] = React.useState("");
   const [entityFilter, setEntityFilter] = React.useState("");
   const [exporting, setExporting] = React.useState(false);
 
   const load = React.useCallback(async (targetPage: number, targetSize: number) => {
     const params = new URLSearchParams({ page: String(targetPage), pageSize: String(targetSize) });
     if (search.trim()) params.set("search", search.trim());
+    if (actionFilter.trim()) params.set("action", actionFilter.trim());
     if (entityFilter) params.set("entityType", entityFilter);
     const { ok, body } = await jsonFetch<{
       data: AuditRow[];
@@ -1034,7 +1039,7 @@ function AuditPanel() {
     setRows(body.data ?? []);
     setTotal(body.total ?? 0);
     if (body.entityTypes) setEntityTypes(body.entityTypes);
-  }, [search, entityFilter]);
+  }, [search, actionFilter, entityFilter]);
 
   React.useEffect(() => {
     const loadData = async () => {
@@ -1051,6 +1056,7 @@ function AuditPanel() {
       for (let p = 1; p <= maxPages; p++) {
         const params = new URLSearchParams({ page: String(p), pageSize: "50" });
         if (search.trim()) params.set("search", search.trim());
+        if (actionFilter.trim()) params.set("action", actionFilter.trim());
         if (entityFilter) params.set("entityType", entityFilter);
         const { ok, body } = await jsonFetch<{ data: AuditRow[]; total: number }>(`/api/superadmin/audit?${params}`);
         if (!ok || !body.data || body.data.length === 0) break;
@@ -1113,6 +1119,16 @@ function AuditPanel() {
               className="h-9 rounded-md border border-input bg-background pl-7 pr-2 text-xs"
             />
           </span>
+          <input
+            aria-label="Filter by action"
+            value={actionFilter}
+            onChange={(e) => {
+              setPage(1);
+              setActionFilter(e.target.value);
+            }}
+            placeholder="Filter action (e.g. ADMIN_CREATED)"
+            className="h-9 rounded-md border border-input bg-background px-2 text-xs"
+          />
           <Select
             items={[{ value: "ALL", label: "All entity types" }, ...entityOptions]}
             value={entityFilter || "ALL"}
@@ -1718,6 +1734,11 @@ function SuperAdminContent() {
   const qTab = searchParams.get("tab");
   const tab: TabValue = qTab && TAB_META.some((t) => t.value === qTab) ? (qTab as TabValue) : "admins";
 
+  const refreshOverview = React.useCallback(async () => {
+    const { ok, body } = await jsonFetch<Overview>("/api/superadmin/overview");
+    if (ok) setOverview(body);
+  }, []);
+
   React.useEffect(() => {
     void (async () => {
       setError(null);
@@ -1739,16 +1760,33 @@ function SuperAdminContent() {
           // Notification badge is best-effort in the local prototype.
         }
         if (meBody.user.role === "SUPERADMIN") {
-          const { ok, body } = await jsonFetch<Overview>("/api/superadmin/overview");
-          if (ok) setOverview(body);
+          await refreshOverview();
         }
       } catch {
         setError("TechTracker could not reach the server. Check your connection and retry.");
       }
     })();
-  }, []);
+  }, [refreshOverview]);
 
   if (!user) {
+    if (error) {
+      return (
+        <main className="flex min-h-screen items-center justify-center p-8">
+          <div className="grid max-w-md gap-4">
+            <Alert variant="destructive" className="border-destructive/40 bg-destructive/10">
+              <CircleAlert />
+              <AlertTitle>Session unavailable</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+            <div>
+              <Link href="/login" className={buttonVariants({ size: "sm" })}>
+                Sign in
+              </Link>
+            </div>
+          </div>
+        </main>
+      );
+    }
     return (
       <main className="flex min-h-screen items-center justify-center p-8">
         <p className="text-sm text-muted-foreground">Loading SuperAdmin console…</p>
@@ -1769,6 +1807,41 @@ function SuperAdminContent() {
   }
 
   const roleCounts = (role: Role) => overview?.usersByRole.find((r) => r.role === role)?._count.id ?? null;
+  const openEscalationsCount =
+    overview?.escalationsByStatus.find((e) => e.status === "OPEN")?._count.id ?? 0;
+
+  const summaryCards = [
+    { label: "SuperAdmins", value: roleCounts("SUPERADMIN"), icon: ShieldCheck },
+    { label: "Coordinators", value: roleCounts("ADMIN"), icon: UserCog },
+    { label: "Students", value: roleCounts("STUDENT"), icon: Users },
+    { label: "Batches", value: overview?.batchCount ?? null, icon: Layers },
+    { label: "Inspections", value: overview?.inspectionCount ?? null, icon: Laptop },
+    { label: "Open escalations", value: overview ? openEscalationsCount : null, icon: Gavel },
+    { label: "Unread alerts", value: overview?.unreadNotifications ?? null, icon: BellRing },
+  ];
+
+  const exportOverviewCsv = async () => {
+    if (!overview) {
+      toast.error("Overview metrics are still loading.");
+      return;
+    }
+    try {
+      const { generateCsv } = await import("@/lib/reports-export");
+      const csv = generateCsv(
+        summaryCards.map((c) => ({ metric: c.label, value: c.value ?? 0 })),
+      );
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "techtracker-superadmin-overview.csv";
+      anchor.click();
+      URL.revokeObjectURL(url);
+      toast.success("Overview summary exported.");
+    } catch {
+      toast.error("The overview export could not be generated.");
+    }
+  };
 
   return (
     <AppShell
@@ -1787,25 +1860,28 @@ function SuperAdminContent() {
         )}
 
         {/* Executive summary */}
-        <section aria-label="Executive summary" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          {[
-            { label: "Coordinators", value: roleCounts("ADMIN"), icon: UserCog },
-            { label: "Students", value: roleCounts("STUDENT"), icon: Users },
-            { label: "Batches", value: overview?.batchCount ?? null, icon: Layers },
-            { label: "Inspections", value: overview?.inspectionCount ?? null, icon: Laptop },
-            { label: "Unread alerts", value: overview?.unreadNotifications ?? null, icon: BellRing },
-          ].map((card) => {
-            const Icon = card.icon;
-            return (
-              <article key={card.label} className="grid gap-1.5 rounded-xl border border-border bg-card p-5 shadow-xs">
-                <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                  <Icon className="size-4 text-primary" aria-hidden="true" />
-                  {card.label}
-                </div>
-                <p className="font-mono text-3xl font-bold tracking-tight tabular-ledger">{card.value ?? "—"}</p>
-              </article>
-            );
-          })}
+        <section aria-label="Executive summary" className="grid gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-medium text-muted-foreground">Executive summary</h2>
+            <Button type="button" variant="outline" size="sm" onClick={() => void exportOverviewCsv()} disabled={!overview}>
+              <FileDown className="size-4" />
+              Export summary CSV
+            </Button>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+            {summaryCards.map((card) => {
+              const Icon = card.icon;
+              return (
+                <article key={card.label} className="grid gap-1.5 rounded-xl border border-border bg-card p-5 shadow-xs">
+                  <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                    <Icon className="size-4 text-primary" aria-hidden="true" />
+                    {card.label}
+                  </div>
+                  <p className="font-mono text-3xl font-bold tracking-tight tabular-ledger">{card.value ?? "—"}</p>
+                </article>
+              );
+            })}
+          </div>
         </section>
 
         <Tabs
@@ -1829,10 +1905,10 @@ function SuperAdminContent() {
         </Tabs>
 
         <section aria-label="Subsystem workspace" className="rounded-xl border border-border bg-card p-5 shadow-xs lg:p-6">
-          {tab === "admins" && <AdminsPanel />}
+          {tab === "admins" && <AdminsPanel onMutate={refreshOverview} />}
           {tab === "config" && <ConfigPanel />}
           {tab === "batches" && <BatchesPanel />}
-          {tab === "escalations" && <EscalationsPanel />}
+          {tab === "escalations" && <EscalationsPanel onMutate={refreshOverview} />}
           {tab === "audit" && <AuditPanel />}
           {tab === "rooms" && <RoomsPanel />}
           {tab === "alerts" && <AlertsPanel overview={overview} />}

@@ -520,15 +520,14 @@ async fn submit(
             "Task is not ready for submission.".into(),
         ));
     }
-    let v: i64 = sqlx::query(
+    let v: i32 = sqlx::query(
         "SELECT COALESCE(MAX(version),0) as v FROM \"TaskSubmission\" WHERE \"assignmentId\"=$1",
     )
     .bind(&aid)
     .fetch_one(&mut *tx)
     .await?
-    .try_get("v")
-    .unwrap_or(0);
-    let new_v = (v as i32) + 1;
+    .try_get("v")?;
+    let new_v = v + 1;
     let sid = Uuid::new_v4().to_string();
     let keys_val = serde_json::json!(keys);
     sqlx::query("INSERT INTO \"TaskSubmission\" (id,\"assignmentId\",version,summary,\"attachmentKeys\",\"submittedAt\") VALUES ($1,$2,$3,$4,$5,NOW())")

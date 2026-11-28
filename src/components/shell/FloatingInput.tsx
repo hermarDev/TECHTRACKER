@@ -16,7 +16,7 @@ export interface FloatingInputProps
 }
 
 const LABEL_IDLE =
-  "pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 bg-[var(--field-surface,var(--card))] px-1 text-base transition-all duration-150 peer-placeholder-shown:top-1/2 peer-placeholder-shown:-translate-y-1/2 peer-placeholder-shown:text-base peer-focus:top-0 peer-focus:-translate-y-1/2 peer-focus:text-xs peer-[:not(:placeholder-shown)]:top-0 peer-[:not(:placeholder-shown)]:-translate-y-1/2 peer-[:not(:placeholder-shown)]:text-xs";
+  "pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 bg-[var(--field-surface,var(--card))] px-1 text-base transition-all duration-150 peer-placeholder-shown:top-1/2 peer-placeholder-shown:-translate-y-1/2 peer-placeholder-shown:text-base peer-focus:top-0 peer-focus:-translate-y-1/2 peer-focus:text-xs peer-autofill:top-0 peer-autofill:-translate-y-1/2 peer-autofill:text-xs peer-[:not(:placeholder-shown)]:top-0 peer-[:not(:placeholder-shown)]:-translate-y-1/2 peer-[:not(:placeholder-shown)]:text-xs";
 
 export const FloatingInput = React.forwardRef<HTMLInputElement, FloatingInputProps>(
   ({ label, id, className, error, labelClassName, ...props }, ref) => {

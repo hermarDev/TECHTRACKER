@@ -253,7 +253,7 @@ export default function AttendancePage() {
             <div className="space-y-2">
               <Label>Evidence photo</Label>
               <div className="flex flex-col gap-2">
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <Dialog open={isCameraOpen} onOpenChange={handleCameraOpenChange}>
                     <DialogTrigger
                       render={

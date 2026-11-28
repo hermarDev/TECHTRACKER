@@ -64,13 +64,25 @@ export default function AdminTasksPage() {
   const setFormData = taskDraft.setValues;
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [studentError, setStudentError] = React.useState("");
+  const [authError, setAuthError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const controller = new AbortController();
     fetch("/api/auth/me", { signal: controller.signal })
-      .then((response) => response.ok ? response.json() : null)
+      .then(async (response) => {
+        if (!response.ok) {
+          setAuthError("Your session expired. Please sign in again.");
+          return null;
+        }
+        return response.json();
+      })
       .then((data) => { if (data) setUser(data.user); })
-      .catch((error) => { if (error.name !== "AbortError") toast.error("Failed to load account"); });
+      .catch((error) => {
+        if (error.name !== "AbortError") {
+          setAuthError("Failed to load account. Please try again.");
+          toast.error("Failed to load account");
+        }
+      });
     return () => controller.abort();
   }, []);
 
@@ -178,7 +190,23 @@ export default function AdminTasksPage() {
 
   const statusOptions = ["ALL", "ASSIGNED", "IN_PROGRESS", "SUBMITTED", "RETURNED", "ACCEPTED"];
 
-  if (!user) return <main className="p-8">Loading task reports...</main>;
+  if (!user) {
+    if (authError) {
+      return (
+        <main className="flex min-h-screen items-center justify-center p-8">
+          <div className="grid max-w-md gap-4 rounded-xl border border-border bg-card p-6 shadow-xs">
+            <p className="text-sm font-medium text-destructive">{authError}</p>
+            <div>
+              <Link href="/login" className={buttonVariants({ size: "sm" })}>
+                Sign in
+              </Link>
+            </div>
+          </div>
+        </main>
+      );
+    }
+    return <main className="p-8">Loading task reports...</main>;
+  }
 
   return (
     <AppShell user={user} title="Task Assignment & Review" subtitle="Assign technical work and review completion reports.">

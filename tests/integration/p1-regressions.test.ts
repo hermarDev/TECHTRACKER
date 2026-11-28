@@ -471,3 +471,88 @@ describe("P1 F16 conversation pagination", () => {
     expect((secondBody.conversations as unknown[]).length).toBe(2);
   });
 });
+
+describe("E2E S1 task resubmission version increment", () => {
+  it("increments TaskSubmission.version from 1 to 2 on resubmission", async () => {
+    const student = await createVerifiedStudent("resubmit-ver");
+    const admin = await prisma.user.findUniqueOrThrow({
+      where: { email: "coordinator@aclc-mandaue.edu.ph" },
+    });
+    const task = await prisma.task.create({
+      data: {
+        title: `P1 Resubmit ${RUN}`,
+        instructions: "Verify version increment",
+        deadline: new Date("2026-12-31T00:00:00Z"),
+        createdById: admin.id,
+      },
+    });
+    const assignment = await prisma.taskAssignment.create({
+      data: { taskId: task.id, studentId: student.id, status: "IN_PROGRESS" },
+    });
+
+    const studentCookie = await login(student.email);
+    const form1 = new FormData();
+    form1.set("summary", "First submission");
+    form1.set("attachments", new Blob([PNG], { type: "image/png" }), "v1.png");
+    const sub1 = await api(`/api/tasks/${task.id}/submit`, { method: "POST", body: form1 }, studentCookie);
+    expect(sub1.status).toBe(201);
+
+    const adminCookie = await login(admin.email, DEMO_PASSWORD);
+    const ret = await api(
+      `/api/tasks/${task.id}/review`,
+      {
+        method: "POST",
+        body: JSON.stringify({ assignmentId: assignment.id, status: "RETURNED", studentRemark: "Revise" }),
+      },
+      adminCookie
+    );
+    expect(ret.status).toBe(200);
+
+    const form2 = new FormData();
+    form2.set("summary", "Second submission");
+    form2.set("attachments", new Blob([PNG], { type: "image/png" }), "v2.png");
+    const sub2 = await api(`/api/tasks/${task.id}/submit`, { method: "POST", body: form2 }, studentCookie);
+    expect(sub2.status).toBe(201);
+
+    const detail = await api(`/api/tasks/${task.id}`, {}, studentCookie);
+    expect(detail.status).toBe(200);
+    const body = (await jsonOf(detail)) as {
+      task: { assignments: Array<{ submissions: Array<{ version: number }> }> };
+    };
+    const versions = body.task.assignments[0].submissions.map((s) => s.version).sort((a, b) => a - b);
+    expect(versions).toEqual([1, 2]);
+  });
+});
+
+describe("E2E A1 attendance search by studentId", () => {
+  it("matches attendance records by studentId as well as fullName", async () => {
+    const student = await createVerifiedStudent("att-search");
+    const userRow = await prisma.user.findUniqueOrThrow({ where: { id: student.id } });
+    const batch = await prisma.batch.findFirstOrThrow({
+      where: { name: "BSIT-4A Batch 2026-1" },
+    });
+    await prisma.attendanceLog.create({
+      data: {
+        studentId: student.id,
+        batchId: batch.id,
+        shiftDate: new Date("2026-11-21T00:00:00Z"),
+        timeIn: new Date("2026-11-21T08:00:00Z"),
+        photoInKey: "attendance/a1.png",
+        status: "PENDING",
+      },
+    });
+    const adminCookie = await login("coordinator@aclc-mandaue.edu.ph", DEMO_PASSWORD);
+    const res = await api(
+      `/api/attendance?search=${encodeURIComponent(userRow.studentIdNo!)}`,
+      {},
+      adminCookie
+    );
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as {
+      total: number;
+      items: Array<{ student: { studentIdNo: string | null } }>;
+    };
+    expect(body.total).toBeGreaterThanOrEqual(1);
+    expect(body.items.some((row) => row.student.studentIdNo === userRow.studentIdNo)).toBe(true);
+  });
+});

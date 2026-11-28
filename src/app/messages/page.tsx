@@ -329,6 +329,24 @@ export default function MessagesPage() {
   };
 
   if (!me) {
+    if (error) {
+      return (
+        <main className="flex min-h-screen items-center justify-center p-8">
+          <div className="grid max-w-md gap-4">
+            <Alert variant="destructive" className="border-destructive/40 bg-destructive/10">
+              <CircleAlert />
+              <AlertTitle>Session unavailable</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+            <div>
+              <Link href="/login" className={buttonVariants({ size: "sm" })}>
+                Sign in
+              </Link>
+            </div>
+          </div>
+        </main>
+      );
+    }
     return (
       <main className="flex min-h-screen items-center justify-center p-8">
         <p className="text-sm text-muted-foreground">Loading messages…</p>

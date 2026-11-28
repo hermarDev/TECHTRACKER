@@ -50,3 +50,16 @@ for (const { path, heading } of CARD_PAGES) {
     expect(overflow).toBeLessThanOrEqual(1);
   });
 }
+
+test("/attendance has no horizontal overflow at 360px", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 760 });
+  await login(page);
+  await page.goto("/attendance");
+  await expect(page.getByText("Record duty", { exact: true })).toBeVisible();
+
+  const overflow = await page.evaluate(() => {
+    const el = document.documentElement;
+    return el.scrollWidth - el.clientWidth;
+  });
+  expect(overflow).toBeLessThanOrEqual(1);
+});
