@@ -11,7 +11,7 @@ use crate::state::AppState;
 use crate::validation::{ForgotPasswordInput, LoginInput, RegisterInput};
 use axum::extract::{Query, State};
 use axum::http::header::SET_COOKIE;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -22,18 +22,7 @@ use sqlx::Row;
 use uuid::Uuid;
 use validator::Validate;
 
-fn client_ip(headers: &HeaderMap) -> String {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(',').next())
-        .or_else(|| headers.get("x-real-ip").and_then(|v| v.to_str().ok()))
-        .unwrap_or("local")
-        .trim()
-        .to_string()
-}
-
-fn cookie_str(token: &str, max_age: i64, secure: bool) -> String {
+pub(crate) fn cookie_str(token: &str, max_age: i64, secure: bool) -> String {
     format!(
         "techtracker_session={}; HttpOnly; Path=/; SameSite=Lax; Max-Age={}{}",
         token,
@@ -74,15 +63,18 @@ async fn register(
     }
 
     // system config
-    let allow =
-        sqlx::query("SELECT \"allowSelfRegistration\" FROM \"SystemConfig\" WHERE id='singleton'")
-            .fetch_optional(&state.db)
-            .await?;
-    if let Some(row) = allow {
+    let cfg = sqlx::query(
+        "SELECT \"allowSelfRegistration\", \"requiredPreOjtHours\" FROM \"SystemConfig\" WHERE id='singleton'",
+    )
+    .fetch_optional(&state.db)
+    .await?;
+    let mut required_hours: f64 = 100.0;
+    if let Some(row) = cfg {
         let a: bool = row.try_get("allowSelfRegistration").unwrap_or(true);
         if !a {
             return Err(AppError::Forbidden);
         }
+        required_hours = row.try_get("requiredPreOjtHours").unwrap_or(100.0);
     }
 
     let email = input.email.to_lowercase();
@@ -111,10 +103,10 @@ async fn register(
     let user_id = Uuid::new_v4().to_string();
     let mut tx = state.db.begin().await?;
     sqlx::query(
-        "INSERT INTO \"User\" (id, email, \"passwordHash\", \"fullName\", role, status, \"studentIdNo\", program, section, \"verificationToken\", \"verificationSentAt\", \"createdAt\", \"updatedAt\", \"requiredHours\", \"preOjtCompleted\", \"failedLoginCount\") VALUES ($1,$2,$3,$4,'STUDENT','PENDING_VERIFICATION',$5,$6,$7,$8,NOW(),NOW(),NOW(),100,false,0)"
+        "INSERT INTO \"User\" (id, email, \"passwordHash\", \"fullName\", role, status, \"studentIdNo\", program, section, \"verificationToken\", \"verificationSentAt\", \"createdAt\", \"updatedAt\", \"requiredHours\", \"preOjtCompleted\", \"failedLoginCount\") VALUES ($1,$2,$3,$4,'STUDENT','PENDING_VERIFICATION',$5,$6,$7,$8,NOW(),NOW(),NOW(),$9,false,0)"
     )
     .bind(&user_id).bind(&email).bind(&pw_hash).bind(&input.full_name)
-    .bind(&input.student_id_no).bind(&input.program).bind(&input.section).bind(&hash_tok)
+    .bind(&input.student_id_no).bind(&input.program).bind(&input.section).bind(&hash_tok).bind(required_hours)
     .execute(&mut *tx).await?;
 
     let verify_url = format!(
@@ -222,11 +214,7 @@ async fn consume_token(state: &AppState, raw: &str) -> Result<String> {
     Ok(id)
 }
 
-async fn login(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(body): Json<serde_json::Value>,
-) -> Response {
+async fn login(State(state): State<AppState>, Json(body): Json<serde_json::Value>) -> Response {
     let input: LoginInput = match serde_json::from_value(body) {
         Ok(v) => v,
         Err(_) => {
@@ -245,12 +233,12 @@ async fn login(
             .into_response();
     }
     let email = input.email.to_lowercase();
-    let limit_key = format!("login:{}:{}", client_ip(&headers), email);
+    let limit_key = format!("login:{email}");
 
     let row = match sqlx::query("SELECT id,email,\"passwordHash\",\"fullName\",role::text,status::text,\"batchId\",\"failedLoginCount\",\"lockedUntil\"::timestamptz,\"tokenVersion\" FROM \"User\" WHERE email=$1")
         .bind(&email).fetch_optional(&state.db).await {
         Ok(r) => r,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => return AppError::Db(e).into_response(),
     };
     let row = match row {
         Some(r) => r,
@@ -419,7 +407,6 @@ async fn logout(State(state): State<AppState>, auth: Option<AuthUser>) -> Respon
 
 async fn forgot_password(
     State(state): State<AppState>,
-    headers: HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Response> {
     let input: ForgotPasswordInput = serde_json::from_value(body)
@@ -428,7 +415,7 @@ async fn forgot_password(
         .validate()
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     let email = input.email.to_lowercase();
-    let limit_key = format!("forgot:{}:{}", client_ip(&headers), email);
+    let limit_key = format!("forgot:{email}");
     if !state
         .rate_limiter
         .allow(&state.db, &limit_key, 20, chrono::Duration::seconds(60))

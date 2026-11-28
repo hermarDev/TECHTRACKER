@@ -82,6 +82,7 @@ async fn list(
     if page < 1 || page_size < 1 {
         return Err(AppError::BadRequest("Invalid pagination params".into()));
     }
+    let page_size = page_size.min(50);
     let skip = page.saturating_sub(1).saturating_mul(page_size);
     // conversations where user is member, paginated independently of the message window
     let total: i64 = sqlx::query("SELECT COUNT(*) AS c FROM \"Conversation\" WHERE id IN (SELECT \"conversationId\" FROM \"ConversationMember\" WHERE \"userId\"=$1)")

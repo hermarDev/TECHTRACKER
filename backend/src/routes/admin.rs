@@ -60,15 +60,6 @@ pub fn router() -> Router<AppState> {
         .route("/api/admin/batches/:id", patch(batches_patch))
 }
 
-fn norm(page: Option<i64>, ps: Option<i64>) -> (i64, i64, i64) {
-    let page = page.unwrap_or(1).max(1);
-    let mut p = ps.unwrap_or(15);
-    if ![15, 25, 50].contains(&p) {
-        p = 15;
-    }
-    (page, p, (page - 1) * p)
-}
-
 async fn reports(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -77,13 +68,14 @@ async fn reports(
     if !["ADMIN", "SUPERADMIN"].contains(&auth.0.role.as_str()) {
         return Err(AppError::Forbidden);
     }
-    let (page, page_size, skip) = norm(q.page, q.page_size);
+    let (page, page_size, skip) = super::normalize_pagination(q.page, q.page_size);
     let kind = q.report_type.clone();
     let fmt = q
         .format
         .clone()
         .unwrap_or_else(|| "json".into())
         .to_ascii_lowercase();
+    let is_export = fmt == "csv" || fmt == "pdf";
 
     // role scoping: ADMIN sees only their coordinated batches / created tasks
     let admin_scope = auth.0.role == "ADMIN";
@@ -101,10 +93,10 @@ async fn reports(
     let (rows, total): (Vec<Vec<String>>, i64) = match kind.as_deref() {
         Some("task-progress") => {
             let mut data_query = QueryBuilder::new(
-                "SELECT COALESCE(b.name,'Unassigned batch') AS batch, COALESCE(b.section,'') AS section, 'Task Progress' AS metric, a.status::text AS value, u.\"fullName\" || ' - ' || t.title AS label FROM \"TaskAssignment\" a JOIN \"Task\" t ON t.id=a.\"taskId\" JOIN \"User\" u ON u.id=a.\"studentId\" LEFT JOIN \"Batch\" b ON b.id=t.\"batchId\" WHERE TRUE",
+                "SELECT COALESCE(b.name,'Unassigned batch') AS batch, COALESCE(b.section,'') AS section, 'Task Progress' AS metric, a.status::text AS value, u.\"fullName\" || ' - ' || t.title AS label FROM \"TaskAssignment\" a JOIN \"Task\" t ON t.id=a.\"taskId\" JOIN \"User\" u ON u.id=a.\"studentId\" LEFT JOIN \"Batch\" b ON b.id=COALESCE(t.\"batchId\", u.\"batchId\") WHERE TRUE",
             );
             let mut count_query = QueryBuilder::new(
-                "SELECT COUNT(*) AS c FROM \"TaskAssignment\" a JOIN \"Task\" t ON t.id=a.\"taskId\" JOIN \"User\" u ON u.id=a.\"studentId\" WHERE TRUE",
+                "SELECT COUNT(*) AS c FROM \"TaskAssignment\" a JOIN \"Task\" t ON t.id=a.\"taskId\" JOIN \"User\" u ON u.id=a.\"studentId\" LEFT JOIN \"Batch\" b ON b.id=COALESCE(t.\"batchId\", u.\"batchId\") WHERE TRUE",
             );
             if admin_scope {
                 data_query
@@ -129,8 +121,12 @@ async fn reports(
                 }
             }
             if let Some(bid) = &q.batch_id {
-                data_query.push(" AND t.\"batchId\"=").push_bind(bid);
-                count_query.push(" AND t.\"batchId\"=").push_bind(bid);
+                data_query
+                    .push(" AND COALESCE(t.\"batchId\", u.\"batchId\")=")
+                    .push_bind(bid);
+                count_query
+                    .push(" AND COALESCE(t.\"batchId\", u.\"batchId\")=")
+                    .push_bind(bid);
             }
             let total = count_query
                 .build()
@@ -138,31 +134,37 @@ async fn reports(
                 .await?
                 .try_get("c")
                 .unwrap_or(0);
-            data_query
-                .push(" ORDER BY a.\"createdAt\" DESC LIMIT ")
-                .push_bind(page_size)
-                .push(" OFFSET ")
-                .push_bind(skip);
+            data_query.push(" ORDER BY a.\"createdAt\" DESC");
+            if is_export {
+                data_query.push(" LIMIT 10000");
+            } else {
+                data_query
+                    .push(" LIMIT ")
+                    .push_bind(page_size)
+                    .push(" OFFSET ")
+                    .push_bind(skip);
+            }
             (
                 report_rows(data_query.build().fetch_all(&state.db).await?),
                 total,
             )
         }
         Some("lab-equipment") => {
-            let mut rooms_query = QueryBuilder::new(
-                "SELECT r.name, u.condition::text AS value, u.\"unitCode\" FROM (SELECT id,name FROM \"LabRoom\" WHERE TRUE",
+            let mut data_query = QueryBuilder::new(
+                "SELECT '' AS batch, '' AS section, 'Lab Equipment' AS metric, u.condition::text AS value, r.name || ' - ' || u.\"unitCode\" AS label FROM \"ComputerUnit\" u JOIN \"LabRoom\" r ON r.id=u.\"roomId\" WHERE TRUE",
             );
-            let mut count_query =
-                QueryBuilder::new("SELECT COUNT(*) AS c FROM \"LabRoom\" WHERE TRUE");
+            let mut count_query = QueryBuilder::new(
+                "SELECT COUNT(*) AS c FROM \"ComputerUnit\" u JOIN \"LabRoom\" r ON r.id=u.\"roomId\" WHERE TRUE",
+            );
             if admin_scope {
-                rooms_query
-                    .push(" AND (\"assignedAdminId\"=")
+                data_query
+                    .push(" AND (r.\"assignedAdminId\"=")
                     .push_bind(&auth.0.sub)
-                    .push(" OR \"assignedAdminId\" IS NULL)");
+                    .push(" OR r.\"assignedAdminId\" IS NULL)");
                 count_query
-                    .push(" AND (\"assignedAdminId\"=")
+                    .push(" AND (r.\"assignedAdminId\"=")
                     .push_bind(&auth.0.sub)
-                    .push(" OR \"assignedAdminId\" IS NULL)");
+                    .push(" OR r.\"assignedAdminId\" IS NULL)");
             }
             let total = count_query
                 .build()
@@ -170,33 +172,20 @@ async fn reports(
                 .await?
                 .try_get("c")
                 .unwrap_or(0);
-            rooms_query
-                .push(" ORDER BY name ASC LIMIT ")
-                .push_bind(page_size)
-                .push(" OFFSET ")
-                .push_bind(skip);
-            rooms_query.push(") r LEFT JOIN \"ComputerUnit\" u ON u.\"roomId\"=r.id ORDER BY r.name ASC, u.\"unitCode\" ASC");
-            let rows = rooms_query.build().fetch_all(&state.db).await?;
-            let rows = rows
-                .into_iter()
-                .filter_map(|row| {
-                    let unit: Option<String> = row.try_get("unitCode").ok().flatten();
-                    unit.map(|unit| {
-                        vec![
-                            String::new(),
-                            String::new(),
-                            "Lab Equipment".into(),
-                            row.try_get::<String, _>("value").unwrap_or_default(),
-                            format!(
-                                "{} - {}",
-                                row.try_get::<String, _>("name").unwrap_or_default(),
-                                unit
-                            ),
-                        ]
-                    })
-                })
-                .collect();
-            (rows, total)
+            data_query.push(" ORDER BY r.name ASC, u.\"unitCode\" ASC");
+            if is_export {
+                data_query.push(" LIMIT 10000");
+            } else {
+                data_query
+                    .push(" LIMIT ")
+                    .push_bind(page_size)
+                    .push(" OFFSET ")
+                    .push_bind(skip);
+            }
+            (
+                report_rows(data_query.build().fetch_all(&state.db).await?),
+                total,
+            )
         }
         Some("attendance" | "duty-hours") => {
             let mut data_query = QueryBuilder::new(
@@ -249,11 +238,16 @@ async fn reports(
                 .await?
                 .try_get("c")
                 .unwrap_or(0);
-            data_query
-                .push(" ORDER BY a.\"shiftDate\" DESC LIMIT ")
-                .push_bind(page_size)
-                .push(" OFFSET ")
-                .push_bind(skip);
+            data_query.push(" ORDER BY a.\"shiftDate\" DESC");
+            if is_export {
+                data_query.push(" LIMIT 10000");
+            } else {
+                data_query
+                    .push(" LIMIT ")
+                    .push_bind(page_size)
+                    .push(" OFFSET ")
+                    .push_bind(skip);
+            }
             (
                 report_rows(data_query.build().fetch_all(&state.db).await?),
                 total,
@@ -285,11 +279,16 @@ async fn reports(
                 .await?
                 .try_get("c")
                 .unwrap_or(0);
-            data_query
-                .push(" ORDER BY a.\"shiftDate\" DESC LIMIT ")
-                .push_bind(page_size)
-                .push(" OFFSET ")
-                .push_bind(skip);
+            data_query.push(" ORDER BY a.\"shiftDate\" DESC");
+            if is_export {
+                data_query.push(" LIMIT 10000");
+            } else {
+                data_query
+                    .push(" LIMIT ")
+                    .push_bind(page_size)
+                    .push(" OFFSET ")
+                    .push_bind(skip);
+            }
             (
                 report_rows(data_query.build().fetch_all(&state.db).await?),
                 total,
@@ -298,14 +297,25 @@ async fn reports(
     };
 
     crate::audit::write_audit_log(&state, Some(&auth.0.sub), "REPORTS_VIEWED", "Report", kind.as_deref().unwrap_or("all"), json!({"type": kind, "filters": {"batchId": q.batch_id, "section": q.section, "program": q.program, "status": q.status, "dateFrom": q.date_from, "dateTo": q.date_to}})).await.ok();
-    let filename = format!("operational-report-{}", kind.as_deref().unwrap_or("all"));
+    let safe_kind: String = kind
+        .as_deref()
+        .unwrap_or("all")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    let safe_kind = if safe_kind.is_empty() {
+        "all"
+    } else {
+        &safe_kind
+    };
+    let filename = format!("operational-report-{safe_kind}");
 
     if fmt == "csv" {
         let mut csv = String::new();
         if !rows.is_empty() {
             csv.push_str("batch,section,metric,value,label\n");
             for row in &rows {
-                let cells: Vec<String> = row.iter().map(|c| csv_cell(c)).collect();
+                let cells: Vec<String> = row.iter().map(|c| super::csv_cell(c)).collect();
                 csv.push_str(&cells.join(","));
                 csv.push('\n');
             }
@@ -370,19 +380,6 @@ fn report_rows(rows: Vec<sqlx::postgres::PgRow>) -> Vec<Vec<String>> {
         .collect()
 }
 
-fn csv_cell(value: &str) -> String {
-    let sanitized = if value.starts_with(['=', '+', '-', '@', '\t', '\r']) {
-        format!("'{value}")
-    } else {
-        value.to_string()
-    };
-    if sanitized.contains([',', '"', '\n', '\r']) {
-        format!("\"{}\"", sanitized.replace('"', "\"\""))
-    } else {
-        sanitized
-    }
-}
-
 async fn students_list(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -391,7 +388,7 @@ async fn students_list(
     if !["ADMIN", "SUPERADMIN"].contains(&auth.0.role.as_str()) {
         return Err(AppError::Forbidden);
     }
-    let (page, ps, skip) = norm(q.page, q.page_size);
+    let (page, ps, skip) = super::normalize_pagination(q.page, q.page_size);
     let mut count_query = QueryBuilder::new(
         "SELECT COUNT(*) AS c FROM \"User\" u LEFT JOIN \"Batch\" b ON b.id=u.\"batchId\" WHERE u.role::text='STUDENT'",
     );
@@ -643,7 +640,7 @@ async fn batches_list(
     if !["ADMIN", "SUPERADMIN"].contains(&auth.0.role.as_str()) {
         return Err(AppError::Forbidden);
     }
-    let (page, ps, skip) = norm(q.page, q.page_size);
+    let (page, ps, skip) = super::normalize_pagination(q.page, q.page_size);
     let mut count_query = QueryBuilder::new("SELECT COUNT(*) AS c FROM \"Batch\" WHERE TRUE");
     let mut data_query = QueryBuilder::new("SELECT id,name,section,\"academicYear\",\"isActive\",\"coordinatorId\",\"createdAt\"::timestamptz,\"updatedAt\"::timestamptz FROM \"Batch\" WHERE TRUE");
     if let Some(search) = q.search.as_deref().filter(|s| !s.is_empty()) {
@@ -690,17 +687,55 @@ async fn batches_list(
         .build()
         .fetch_all(&state.db)
         .await?;
+    let batch_ids: Vec<String> = rows
+        .iter()
+        .filter_map(|r| r.try_get::<String, _>("id").ok())
+        .collect();
+    let coord_ids: Vec<String> = rows
+        .iter()
+        .filter_map(|r| r.try_get::<String, _>("coordinatorId").ok())
+        .collect();
+    let mut coords_by_id: std::collections::HashMap<String, serde_json::Value> =
+        std::collections::HashMap::new();
+    if !coord_ids.is_empty() {
+        for c in sqlx::query("SELECT id,\"fullName\",email FROM \"User\" WHERE id = ANY($1)")
+            .bind(&coord_ids)
+            .fetch_all(&state.db)
+            .await?
+        {
+            let id: String = c.try_get("id").unwrap_or_default();
+            coords_by_id.insert(
+                id.clone(),
+                json!({
+                    "id": id,
+                    "fullName": c.try_get::<String,_>("fullName").unwrap_or_default(),
+                    "email": c.try_get::<String,_>("email").unwrap_or_default(),
+                }),
+            );
+        }
+    }
+    let mut students_by_batch: std::collections::HashMap<String, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
+    if !batch_ids.is_empty() {
+        for s in sqlx::query("SELECT id,\"batchId\",\"studentIdNo\",\"fullName\" FROM \"User\" WHERE \"batchId\" = ANY($1) ORDER BY \"fullName\" ASC")
+            .bind(&batch_ids)
+            .fetch_all(&state.db)
+            .await?
+        {
+            let bid: String = s.try_get("batchId").unwrap_or_default();
+            students_by_batch.entry(bid).or_default().push(json!({
+                "id": s.try_get::<String,_>("id").unwrap_or_default(),
+                "studentIdNo": s.try_get::<Option<String>,_>("studentIdNo").unwrap_or(None),
+                "fullName": s.try_get::<String,_>("fullName").unwrap_or_default(),
+            }));
+        }
+    }
     let mut items = Vec::with_capacity(rows.len());
     for r in rows {
         let batch_id: String = r.try_get("id")?;
         let coordinator_id: String = r.try_get("coordinatorId")?;
-        let coordinator_row = sqlx::query("SELECT id,\"fullName\",email FROM \"User\" WHERE id=$1")
-            .bind(&coordinator_id)
-            .fetch_optional(&state.db)
-            .await?;
-        let coordinator = coordinator_row.map(|c| json!({"id": c.try_get::<String,_>("id").unwrap_or_default(), "fullName": c.try_get::<String,_>("fullName").unwrap_or_default(), "email": c.try_get::<String,_>("email").unwrap_or_default()}));
-        let student_rows = sqlx::query("SELECT id,\"studentIdNo\",\"fullName\" FROM \"User\" WHERE \"batchId\"=$1 ORDER BY \"fullName\" ASC").bind(&batch_id).fetch_all(&state.db).await?;
-        let students: Vec<serde_json::Value> = student_rows.into_iter().map(|s| json!({"id": s.try_get::<String,_>("id").unwrap_or_default(), "studentIdNo": s.try_get::<Option<String>,_>("studentIdNo").unwrap_or(None), "fullName": s.try_get::<String,_>("fullName").unwrap_or_default()})).collect();
+        let coordinator = coords_by_id.get(&coordinator_id).cloned();
+        let students = students_by_batch.remove(&batch_id).unwrap_or_default();
         items.push(json!({
             "id": batch_id,
             "name": r.try_get::<String,_>("name").unwrap_or_default(),
@@ -886,8 +921,14 @@ async fn batches_create(
                     .execute(&mut *tx)
                     .await?;
                 } else {
-                    sqlx::query("INSERT INTO \"User\" (id,email,\"passwordHash\",\"fullName\",role,status,\"studentIdNo\",program,section,\"batchId\",\"createdAt\",\"updatedAt\") VALUES ($1,$2,'',$3,'STUDENT','PENDING_VERIFICATION',$4,$5,$6,$7,NOW(),NOW())")
-                        .bind(uuid::Uuid::new_v4().to_string()).bind(email).bind(full_name.trim()).bind(student_id_no).bind(student.get("program").and_then(serde_json::Value::as_str)).bind(student.get("section").and_then(serde_json::Value::as_str)).bind(&batch_id).execute(&mut *tx).await?;
+                    let required_hours: f64 = sqlx::query_scalar(
+                        "SELECT \"requiredPreOjtHours\" FROM \"SystemConfig\" WHERE id='singleton'",
+                    )
+                    .fetch_optional(&mut *tx)
+                    .await?
+                    .unwrap_or(100.0);
+                    sqlx::query("INSERT INTO \"User\" (id,email,\"passwordHash\",\"fullName\",role,status,\"studentIdNo\",program,section,\"batchId\",\"requiredHours\",\"createdAt\",\"updatedAt\") VALUES ($1,$2,'',$3,'STUDENT','PENDING_VERIFICATION',$4,$5,$6,$7,$8,NOW(),NOW())")
+                        .bind(uuid::Uuid::new_v4().to_string()).bind(email).bind(full_name.trim()).bind(student_id_no).bind(student.get("program").and_then(serde_json::Value::as_str)).bind(student.get("section").and_then(serde_json::Value::as_str)).bind(&batch_id).bind(required_hours).execute(&mut *tx).await?;
                 }
             }
         }
@@ -997,41 +1038,56 @@ async fn batches_patch(
     }
     let b: B =
         serde_json::from_value(body).map_err(|_| AppError::BadRequest("Invalid batch.".into()))?;
+    let mut tx = state.db.begin().await?;
     if let Some(n) = &b.name {
-        if n.trim().chars().count() < 2 {
+        let trimmed = n.trim();
+        if trimmed.chars().count() < 2 {
             return Err(AppError::BadRequest("Batch name is required".into()));
         }
-        sqlx::query("UPDATE \"Batch\" SET name=$1,\"updatedAt\"=NOW() WHERE id=$2")
-            .bind(n)
+        if sqlx::query("SELECT id FROM \"Batch\" WHERE name=$1 AND id<>$2")
+            .bind(trimmed)
             .bind(&id)
-            .execute(&state.db)
+            .fetch_optional(&mut *tx)
+            .await?
+            .is_some()
+        {
+            return Err(AppError::Conflict(
+                "A batch with this name already exists".into(),
+            ));
+        }
+        sqlx::query("UPDATE \"Batch\" SET name=$1,\"updatedAt\"=NOW() WHERE id=$2")
+            .bind(trimmed)
+            .bind(&id)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(s) = &b.section {
-        if s.trim().is_empty() {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
             return Err(AppError::BadRequest("Section is required".into()));
         }
         sqlx::query("UPDATE \"Batch\" SET section=$1,\"updatedAt\"=NOW() WHERE id=$2")
-            .bind(s)
+            .bind(trimmed)
             .bind(&id)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(a) = &b.academic_year {
-        if a.trim().is_empty() {
+        let trimmed = a.trim();
+        if trimmed.is_empty() {
             return Err(AppError::BadRequest("Academic year is required".into()));
         }
         sqlx::query("UPDATE \"Batch\" SET \"academicYear\"=$1,\"updatedAt\"=NOW() WHERE id=$2")
-            .bind(a)
+            .bind(trimmed)
             .bind(&id)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(v) = b.is_active {
         sqlx::query("UPDATE \"Batch\" SET \"isActive\"=$1,\"updatedAt\"=NOW() WHERE id=$2")
             .bind(v)
             .bind(&id)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(c) = &b.coordinator_id {
@@ -1041,9 +1097,10 @@ async fn batches_patch(
         sqlx::query("UPDATE \"Batch\" SET \"coordinatorId\"=$1,\"updatedAt\"=NOW() WHERE id=$2")
             .bind(c)
             .bind(&id)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
+    tx.commit().await?;
     crate::audit::write_audit_log(&state, Some(&auth.0.sub), "BATCH_UPDATED", "Batch", &id, json!({"name": b.name, "section": b.section, "academicYear": b.academic_year, "isActive": b.is_active})).await?;
     let updated = sqlx::query("SELECT id,name,section,\"academicYear\",\"isActive\",\"coordinatorId\",\"createdAt\"::timestamptz,\"updatedAt\"::timestamptz FROM \"Batch\" WHERE id=$1").bind(&id).fetch_one(&state.db).await?;
     Ok(Json(json!({"batch": batch_json(&updated)})))

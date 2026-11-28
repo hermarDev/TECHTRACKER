@@ -175,7 +175,7 @@ export default function AdminReportsPage() {
   };
 
   const exportUrl = (format: "csv" | "pdf") =>
-    `/api/admin/reports?${buildQuery(appliedFilters, { format, pageSize: "50" })}`;
+    `/api/admin/reports?${buildQuery(appliedFilters, { format })}`;
 
   if (!user) {
     return (

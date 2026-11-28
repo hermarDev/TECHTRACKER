@@ -53,15 +53,6 @@ pub fn router() -> Router<AppState> {
         .route("/api/tasks/:id/review", post(review))
 }
 
-fn normalize_pagination(page: Option<i64>, page_size: Option<i64>) -> (i64, i64, i64) {
-    let page = page.unwrap_or(1).max(1);
-    let mut ps = page_size.unwrap_or(15);
-    if ![15, 25, 50].contains(&ps) {
-        ps = 15;
-    }
-    ((page), ps, (page - 1) * ps)
-}
-
 async fn list(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -70,7 +61,7 @@ async fn list(
     if !["STUDENT", "ADMIN", "SUPERADMIN"].contains(&auth.0.role.as_str()) {
         return Err(AppError::Forbidden);
     }
-    let (page, page_size, skip) = normalize_pagination(q.page, q.page_size);
+    let (page, page_size, skip) = super::normalize_pagination(q.page, q.page_size);
     let search = q.search.as_deref().unwrap_or_default().trim().to_string();
     // Status lives on the assignment, not the task; ignore unknown values instead of failing the query.
     let status = match q.status.as_deref() {
@@ -136,32 +127,44 @@ async fn list(
         .fetch_all(&state.db)
         .await?;
 
-    let mut items = Vec::new();
+    let task_ids: Vec<String> = rows
+        .iter()
+        .filter_map(|r| r.try_get::<String, _>("id").ok())
+        .collect();
+    let mut assigns_by_task: std::collections::HashMap<String, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
+    if !task_ids.is_empty() {
+        let assigns = if auth.0.role == "STUDENT" {
+            sqlx::query("SELECT ta.id,ta.\"taskId\",ta.\"studentId\",ta.status::text,ta.\"startedAt\"::timestamptz,ta.\"acceptedAt\"::timestamptz,ta.\"createdAt\"::timestamptz,ta.\"updatedAt\"::timestamptz, u.\"fullName\",u.\"studentIdNo\" FROM \"TaskAssignment\" ta JOIN \"User\" u ON ta.\"studentId\"=u.id WHERE ta.\"taskId\" = ANY($1) AND ta.\"studentId\"=$2")
+                .bind(&task_ids).bind(&auth.0.sub).fetch_all(&state.db).await.unwrap_or_default()
+        } else {
+            sqlx::query("SELECT ta.id,ta.\"taskId\",ta.\"studentId\",ta.status::text,ta.\"startedAt\"::timestamptz,ta.\"acceptedAt\"::timestamptz,ta.\"createdAt\"::timestamptz,ta.\"updatedAt\"::timestamptz, u.\"fullName\",u.\"studentIdNo\" FROM \"TaskAssignment\" ta JOIN \"User\" u ON ta.\"studentId\"=u.id WHERE ta.\"taskId\" = ANY($1)")
+                .bind(&task_ids).fetch_all(&state.db).await.unwrap_or_default()
+        };
+        for a in assigns {
+            let tid: String = a.try_get("taskId").unwrap_or_default();
+            assigns_by_task.entry(tid.clone()).or_default().push(json!({
+                "id": a.try_get::<String,_>("id").unwrap_or_default(),
+                "taskId": tid,
+                "studentId": a.try_get::<String,_>("studentId").unwrap_or_default(),
+                "status": a.try_get::<String,_>("status").unwrap_or_default(),
+                "startedAt": a.try_get::<Option<chrono::DateTime<Utc>>,_>("startedAt").ok().flatten().map(|d| d.to_rfc3339()),
+                "acceptedAt": a.try_get::<Option<chrono::DateTime<Utc>>,_>("acceptedAt").ok().flatten().map(|d| d.to_rfc3339()),
+                "createdAt": a.try_get::<chrono::DateTime<Utc>,_>("createdAt").map(|d| d.to_rfc3339()).unwrap_or_default(),
+                "updatedAt": a.try_get::<chrono::DateTime<Utc>,_>("updatedAt").map(|d| d.to_rfc3339()).unwrap_or_default(),
+                "student": {
+                    "id": a.try_get::<String,_>("studentId").unwrap_or_default(),
+                    "fullName": a.try_get::<String,_>("fullName").unwrap_or_default(),
+                    "studentIdNo": a.try_get::<Option<String>,_>("studentIdNo").unwrap_or(None),
+                }
+            }));
+        }
+    }
+
+    let mut items = Vec::with_capacity(rows.len());
     for r in rows {
         let task_id: String = r.try_get("id")?;
-        // assignments
-        let assigns = if auth.0.role == "STUDENT" {
-            sqlx::query("SELECT ta.id,ta.\"taskId\",ta.\"studentId\",ta.status::text,ta.\"startedAt\"::timestamptz,ta.\"acceptedAt\"::timestamptz,ta.\"createdAt\"::timestamptz,ta.\"updatedAt\"::timestamptz, u.\"fullName\",u.\"studentIdNo\" FROM \"TaskAssignment\" ta JOIN \"User\" u ON ta.\"studentId\"=u.id WHERE ta.\"taskId\"=$1 AND ta.\"studentId\"=$2")
-                .bind(&task_id).bind(&auth.0.sub).fetch_all(&state.db).await.unwrap_or_default()
-        } else {
-            sqlx::query("SELECT ta.id,ta.\"taskId\",ta.\"studentId\",ta.status::text,ta.\"startedAt\"::timestamptz,ta.\"acceptedAt\"::timestamptz,ta.\"createdAt\"::timestamptz,ta.\"updatedAt\"::timestamptz, u.\"fullName\",u.\"studentIdNo\" FROM \"TaskAssignment\" ta JOIN \"User\" u ON ta.\"studentId\"=u.id WHERE ta.\"taskId\"=$1")
-                .bind(&task_id).fetch_all(&state.db).await.unwrap_or_default()
-        };
-        let assignments: Vec<serde_json::Value> = assigns.into_iter().map(|a| json!({
-            "id": a.try_get::<String,_>("id").unwrap_or_default(),
-            "taskId": a.try_get::<String,_>("taskId").unwrap_or_default(),
-            "studentId": a.try_get::<String,_>("studentId").unwrap_or_default(),
-            "status": a.try_get::<String,_>("status").unwrap_or_default(),
-            "startedAt": a.try_get::<Option<chrono::DateTime<Utc>>,_>("startedAt").ok().flatten().map(|d| d.to_rfc3339()),
-            "acceptedAt": a.try_get::<Option<chrono::DateTime<Utc>>,_>("acceptedAt").ok().flatten().map(|d| d.to_rfc3339()),
-            "createdAt": a.try_get::<chrono::DateTime<Utc>,_>("createdAt").map(|d| d.to_rfc3339()).unwrap_or_default(),
-            "updatedAt": a.try_get::<chrono::DateTime<Utc>,_>("updatedAt").map(|d| d.to_rfc3339()).unwrap_or_default(),
-            "student": {
-                "id": a.try_get::<String,_>("studentId").unwrap_or_default(),
-                "fullName": a.try_get::<String,_>("fullName").unwrap_or_default(),
-                "studentIdNo": a.try_get::<Option<String>,_>("studentIdNo").unwrap_or(None),
-            }
-        })).collect();
+        let assignments = assigns_by_task.remove(&task_id).unwrap_or_default();
 
         items.push(json!({
             "id": task_id,
@@ -311,41 +314,57 @@ async fn get_one(
     let assigns = sqlx::query("SELECT ta.id,ta.\"taskId\",ta.\"studentId\",ta.status::text,ta.\"startedAt\"::timestamptz,ta.\"acceptedAt\"::timestamptz,ta.\"createdAt\"::timestamptz,ta.\"updatedAt\"::timestamptz, u.\"fullName\",u.\"studentIdNo\" FROM \"TaskAssignment\" ta JOIN \"User\" u ON ta.\"studentId\"=u.id WHERE ta.\"taskId\"=$1")
         .bind(&id).fetch_all(&state.db).await.unwrap_or_default();
 
+    let assignment_ids: Vec<String> = assigns
+        .iter()
+        .filter_map(|a| a.try_get::<String, _>("id").ok())
+        .collect();
+    let mut remarks_by_assign: std::collections::HashMap<String, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
+    let mut subs_by_assign: std::collections::HashMap<String, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
+    if !assignment_ids.is_empty() {
+        for rm in sqlx::query("SELECT tr.id,tr.\"assignmentId\",tr.\"authorId\",tr.visibility::text,tr.body,tr.\"createdAt\"::timestamptz,u.\"fullName\" AS \"authorFullName\" FROM \"TaskRemark\" tr LEFT JOIN \"User\" u ON u.id=tr.\"authorId\" WHERE tr.\"assignmentId\" = ANY($1) ORDER BY tr.\"createdAt\"::timestamptz ASC")
+            .bind(&assignment_ids).fetch_all(&state.db).await.unwrap_or_default()
+        {
+            let aid: String = rm.try_get("assignmentId").unwrap_or_default();
+            remarks_by_assign.entry(aid.clone()).or_default().push(json!({
+                "id": rm.try_get::<String,_>("id").unwrap_or_default(),
+                "assignmentId": aid,
+                "authorId": rm.try_get::<String,_>("authorId").unwrap_or_default(),
+                "author": {
+                    "id": rm.try_get::<String,_>("authorId").unwrap_or_default(),
+                    "fullName": rm.try_get::<Option<String>,_>("authorFullName").ok().flatten().unwrap_or_else(|| "Coordinator".to_string()),
+                },
+                "visibility": rm.try_get::<String,_>("visibility").unwrap_or_default(),
+                "body": rm.try_get::<String,_>("body").unwrap_or_default(),
+                "createdAt": rm.try_get::<chrono::DateTime<Utc>,_>("createdAt").map(|d| d.to_rfc3339()).unwrap_or_default(),
+            }));
+        }
+        for s in sqlx::query("SELECT id,\"assignmentId\",version,summary,\"attachmentKeys\",\"submittedAt\"::timestamptz FROM \"TaskSubmission\" WHERE \"assignmentId\" = ANY($1) ORDER BY version DESC")
+            .bind(&assignment_ids).fetch_all(&state.db).await.unwrap_or_default()
+        {
+            let aid: String = s.try_get("assignmentId").unwrap_or_default();
+            subs_by_assign.entry(aid.clone()).or_default().push(json!({
+                "id": s.try_get::<String,_>("id").unwrap_or_default(),
+                "assignmentId": aid,
+                "version": s.try_get::<i32,_>("version").unwrap_or(0),
+                "summary": s.try_get::<String,_>("summary").unwrap_or_default(),
+                "attachmentKeys": s.try_get::<serde_json::Value,_>("attachmentKeys").unwrap_or(json!([])),
+                "submittedAt": s.try_get::<chrono::DateTime<Utc>,_>("submittedAt").map(|d| d.to_rfc3339()).unwrap_or_default(),
+            }));
+        }
+    }
+
     let mut assignments = Vec::new();
     for a in assigns {
         let aid: String = a.try_get("id")?;
-        // remarks
-        let remarks = sqlx::query("SELECT tr.id,tr.\"assignmentId\",tr.\"authorId\",tr.visibility::text,tr.body,tr.\"createdAt\"::timestamptz,u.\"fullName\" AS \"authorFullName\" FROM \"TaskRemark\" tr LEFT JOIN \"User\" u ON u.id=tr.\"authorId\" WHERE tr.\"assignmentId\"=$1 ORDER BY tr.\"createdAt\"::timestamptz ASC")
-            .bind(&aid).fetch_all(&state.db).await.unwrap_or_default();
-        let remarks_json: Vec<serde_json::Value> = remarks.into_iter().map(|rm| json!({
-            "id": rm.try_get::<String,_>("id").unwrap_or_default(),
-            "assignmentId": rm.try_get::<String,_>("assignmentId").unwrap_or_default(),
-            "authorId": rm.try_get::<String,_>("authorId").unwrap_or_default(),
-            "author": {
-                "id": rm.try_get::<String,_>("authorId").unwrap_or_default(),
-                "fullName": rm.try_get::<Option<String>,_>("authorFullName").ok().flatten().unwrap_or_else(|| "Coordinator".to_string()),
-            },
-            "visibility": rm.try_get::<String,_>("visibility").unwrap_or_default(),
-            "body": rm.try_get::<String,_>("body").unwrap_or_default(),
-            "createdAt": rm.try_get::<chrono::DateTime<Utc>,_>("createdAt").map(|d| d.to_rfc3339()).unwrap_or_default(),
-        })).collect();
-        // submissions
-        let subs = sqlx::query("SELECT id,\"assignmentId\",version,summary,\"attachmentKeys\",\"submittedAt\"::timestamptz FROM \"TaskSubmission\" WHERE \"assignmentId\"=$1 ORDER BY version DESC")
-            .bind(&aid).fetch_all(&state.db).await.unwrap_or_default();
-        let subs_json: Vec<serde_json::Value> = subs.into_iter().map(|s| json!({
-            "id": s.try_get::<String,_>("id").unwrap_or_default(),
-            "assignmentId": s.try_get::<String,_>("assignmentId").unwrap_or_default(),
-            "version": s.try_get::<i32,_>("version").unwrap_or(0),
-            "summary": s.try_get::<String,_>("summary").unwrap_or_default(),
-            "attachmentKeys": s.try_get::<serde_json::Value,_>("attachmentKeys").unwrap_or(json!([])),
-            "submittedAt": s.try_get::<chrono::DateTime<Utc>,_>("submittedAt").map(|d| d.to_rfc3339()).unwrap_or_default(),
-        })).collect();
-
         let student_id: String = a.try_get("studentId")?;
         // student scope filtering
         if auth.0.role == "STUDENT" && student_id != auth.0.sub {
             continue;
         }
+        let remarks_json = remarks_by_assign.remove(&aid).unwrap_or_default();
+        let subs_json = subs_by_assign.remove(&aid).unwrap_or_default();
 
         // filter remarks visibility for students
         let remarks_filtered = if auth.0.role == "STUDENT" {

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { Role, TaskAssignmentStatus } from "@/lib/types";
 import { computeHoursProgress } from "@/lib/hours";
+import { formatSafeDate, formatSafeDateTime } from "@/lib/task-format";
 import { toast } from "sonner";
 import { AppShell } from "@/components/shell/AppShell";
 import { StatusBadge } from "@/components/shell/StatusBadge";
@@ -54,33 +55,6 @@ type TaskAssignment = {
   status: string;
   task: { title: string; category: string; deadline: string };
 };
-
-function toDate(value: Date | string): Date {
-  return value instanceof Date ? value : new Date(value);
-}
-
-function formatDate(date: Date | string | null | undefined): string {
-  if (!date) return "Not set";
-  const d = toDate(date);
-  return Number.isNaN(d.getTime())
-    ? "Not set"
-    : d.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
-}
-
-function formatDateTime(date: Date | string | null | undefined): string {
-  if (!date) return "—";
-  const d = toDate(date);
-  return Number.isNaN(d.getTime())
-    ? "—"
-    : d.toLocaleString("en-PH", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      });
-}
 
 export default function StudentDashboardPage() {
   const router = useRouter();
@@ -335,7 +309,7 @@ export default function StudentDashboardPage() {
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{assignment.task.title}</p>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        {assignment.task.category} · Due {formatDate(assignment.task.deadline)}
+                        {assignment.task.category} · Due {formatSafeDate(assignment.task.deadline)}
                       </p>
                     </div>
                     <StatusBadge status={assignment.status} />
@@ -366,7 +340,7 @@ export default function StudentDashboardPage() {
                 {recentAttendance.map((log) => (
                   <li key={log.id} className="flex items-start justify-between gap-3 py-3 first:pt-0 last:pb-0">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium">{formatDateTime(log.shiftDate)}</p>
+                      <p className="text-sm font-medium">{formatSafeDateTime(log.shiftDate)}</p>
                       <p className="mt-0.5 text-xs text-muted-foreground tabular-ledger">
                         {log.status === "APPROVED"
                           ? `${log.creditedHours.toFixed(2)} credited hrs`

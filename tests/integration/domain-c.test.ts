@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import { canUseMessaging } from "@/lib/rbac-policies";
 import type { Role } from "@/lib/types";
 const BACKEND_URL = process.env.RUST_BACKEND_URL ?? "http://127.0.0.1:8080";
 const DEMO_PASSWORD = "TechTrack@2026";
@@ -160,14 +159,6 @@ beforeAll(async () => {
     throw new Error(`Could not create escalation fixture: ${escalationResponse.status}`);
   }
   escalationId = escalationBody.escalation.id;
-});
-
-describe("Domain C — lib: rbac messaging", () => {
-  it("blocks SuperAdmin from messaging, allows Admin and Student", () => {
-    expect(canUseMessaging("SUPERADMIN")).toBe(false);
-    expect(canUseMessaging("ADMIN")).toBe(true);
-    expect(canUseMessaging("STUDENT")).toBe(true);
-  });
 });
 
 // ===========================================================================

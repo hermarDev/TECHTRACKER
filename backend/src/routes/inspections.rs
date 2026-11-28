@@ -294,6 +294,8 @@ async fn create(
         sqlx::query("INSERT INTO \"InspectionItem\" (id,\"inspectionId\",\"unitId\",condition,remarks,\"photoKey\") VALUES ($1,$2,$3,$4::\"UnitCondition\",$5,$6)")
             .bind(Uuid::new_v4().to_string()).bind(&iid).bind(&it.unit_id).bind(&it.condition)
             .bind(it.remarks.as_deref()).bind(it.photo_key.as_deref()).execute(&mut *tx).await?;
+        sqlx::query("UPDATE \"ComputerUnit\" SET condition=$1::\"UnitCondition\", \"lastInspectedAt\"=NOW() WHERE id=$2")
+            .bind(&it.condition).bind(&it.unit_id).execute(&mut *tx).await?;
     }
     crate::audit::write_audit_log_tx(
         &mut tx,
@@ -338,63 +340,58 @@ async fn rooms(State(state): State<AppState>, auth: AuthUser) -> Result<Json<ser
         return Err(AppError::Forbidden);
     }
     let rooms = sqlx::query(
-        "SELECT id,name,building FROM \"LabRoom\" WHERE \"isActive\"=true ORDER BY name ASC",
+        "SELECT id,name,building,\"assignedAdminId\",\"assignedStudentId\" FROM \"LabRoom\" WHERE \"isActive\"=true ORDER BY name ASC",
     )
     .fetch_all(&state.db)
     .await?;
-    let mut out = Vec::new();
-    for r in rooms {
-        let rid: String = r.try_get("id")?;
-        let assigned_admin: Option<String> =
-            sqlx::query("SELECT \"assignedAdminId\" FROM \"LabRoom\" WHERE id=$1")
-                .bind(&rid)
-                .fetch_one(&state.db)
-                .await?
-                .try_get("assignedAdminId")
-                .ok();
-        let assigned_student: Option<String> =
-            sqlx::query("SELECT \"assignedStudentId\" FROM \"LabRoom\" WHERE id=$1")
-                .bind(&rid)
-                .fetch_one(&state.db)
-                .await?
-                .try_get("assignedStudentId")
-                .ok();
-        let accessible = match auth.0.role.as_str() {
-            "SUPERADMIN" => true,
-            "ADMIN" => assigned_admin.is_none() || assigned_admin.as_deref() == Some(&auth.0.sub),
-            _ => assigned_student.as_deref() == Some(&auth.0.sub),
-        };
-        if !accessible {
-            continue;
+    let accessible_rooms: Vec<_> = rooms
+        .into_iter()
+        .filter(|r| {
+            let assigned_admin: Option<String> = r.try_get("assignedAdminId").ok().flatten();
+            let assigned_student: Option<String> = r.try_get("assignedStudentId").ok().flatten();
+            match auth.0.role.as_str() {
+                "SUPERADMIN" => true,
+                "ADMIN" => {
+                    assigned_admin.is_none() || assigned_admin.as_deref() == Some(&auth.0.sub)
+                }
+                _ => assigned_student.as_deref() == Some(&auth.0.sub),
+            }
+        })
+        .collect();
+    let room_ids: Vec<String> = accessible_rooms
+        .iter()
+        .filter_map(|r| r.try_get::<String, _>("id").ok())
+        .collect();
+    let mut units_by_room: std::collections::HashMap<String, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
+    if !room_ids.is_empty() {
+        for u in sqlx::query("SELECT id,\"roomId\",\"unitCode\",condition::text FROM \"ComputerUnit\" WHERE \"roomId\" = ANY($1) ORDER BY \"unitCode\" ASC")
+            .bind(&room_ids)
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_default()
+        {
+            let room_id: String = u.try_get("roomId").unwrap_or_default();
+            units_by_room.entry(room_id).or_default().push(json!({
+                "id": u.try_get::<String,_>("id").unwrap_or_default(),
+                "unitCode": u.try_get::<String,_>("unitCode").unwrap_or_default(),
+                "condition": u.try_get::<String,_>("condition").unwrap_or_default(),
+            }));
         }
-        let units = sqlx::query("SELECT id,\"unitCode\",condition::text FROM \"ComputerUnit\" WHERE \"roomId\"=$1 ORDER BY \"unitCode\" ASC").bind(&rid).fetch_all(&state.db).await.unwrap_or_default();
-        let units_json: Vec<serde_json::Value> = units
-            .into_iter()
-            .map(|u| {
-                json!({
-                    "id": u.try_get::<String,_>("id").unwrap_or_default(),
-                    "unitCode": u.try_get::<String,_>("unitCode").unwrap_or_default(),
-                    "condition": u.try_get::<String,_>("condition").unwrap_or_default(),
-                })
-            })
-            .collect();
-        out.push(json!({
-            "id": rid,
-            "name": r.try_get::<String,_>("name").unwrap_or_default(),
-            "building": r.try_get::<String,_>("building").unwrap_or_default(),
-            "units": units_json,
-        }));
     }
-    write_audit_log(
-        &state,
-        Some(&auth.0.sub),
-        "INSPECTION_ROOMS_LISTED",
-        "LabRoom",
-        "all",
-        json!({"count": out.len()}),
-    )
-    .await
-    .ok();
+    let out: Vec<serde_json::Value> = accessible_rooms
+        .into_iter()
+        .map(|r| {
+            let rid: String = r.try_get("id").unwrap_or_default();
+            let units_json = units_by_room.remove(&rid).unwrap_or_default();
+            json!({
+                "id": rid,
+                "name": r.try_get::<String,_>("name").unwrap_or_default(),
+                "building": r.try_get::<String,_>("building").unwrap_or_default(),
+                "units": units_json,
+            })
+        })
+        .collect();
     Ok(Json(json!({"rooms": out})))
 }
 
@@ -513,13 +510,13 @@ async fn export(
             let inspector: String = row.try_get("inspector").unwrap_or_default();
             csv.push_str(&format!(
                 "{},{},{},{},{},{},{}\n",
-                csv_cell(&room),
-                csv_cell(&unit_code),
-                csv_cell(&condition),
-                csv_cell(&remarks),
-                csv_cell(&photo_key),
-                csv_cell(&inspected_at.to_rfc3339()),
-                csv_cell(&inspector),
+                super::csv_cell(&room),
+                super::csv_cell(&unit_code),
+                super::csv_cell(&condition),
+                super::csv_cell(&remarks),
+                super::csv_cell(&photo_key),
+                super::csv_cell(&inspected_at.to_rfc3339()),
+                super::csv_cell(&inspector),
             ));
         }
     }
@@ -543,19 +540,6 @@ async fn export(
         )
         .body(Body::from(csv))
         .map_err(|e| AppError::Internal(e.to_string()))
-}
-
-fn csv_cell(value: &str) -> String {
-    let sanitized = if value.starts_with(['=', '+', '-', '@', '\t', '\r']) {
-        format!("'{value}")
-    } else {
-        value.to_string()
-    };
-    if sanitized.contains([',', '"', '\n', '\r']) {
-        format!("\"{}\"", sanitized.replace('"', "\"\""))
-    } else {
-        sanitized
-    }
 }
 
 async fn review(

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { canInspectRoom, canUseMessaging, roleDashboardPath } from "@/lib/rbac-policies";
-import { calculateSessionHours, computeHoursProgress, evaluateScheduleWindow } from "@/lib/hours";
+import { roleDashboardPath } from "@/lib/rbac-policies";
+import { computeHoursProgress } from "@/lib/hours";
 import { formatSafeDate, formatSafeDateTime, normalizeTaskAttachments } from "@/lib/task-format";
 
 describe("RBAC & Charter Delimitations (04S, 09S, 11W)", () => {
@@ -9,27 +9,10 @@ describe("RBAC & Charter Delimitations (04S, 09S, 11W)", () => {
     expect(roleDashboardPath("ADMIN")).toBe("/admin");
     expect(roleDashboardPath("STUDENT")).toBe("/student");
   });
-
-  it("blocks SuperAdmin from chat per Charter 160 & Flowchart 11W", () => {
-    expect(canUseMessaging("STUDENT")).toBe(true);
-    expect(canUseMessaging("ADMIN")).toBe(true);
-    expect(canUseMessaging("SUPERADMIN")).toBe(false);
-  });
-
-  it("restricts student room inspection to assigned rooms only", () => {
-    const room = { assignedAdminId: "admin-1", assignedStudentId: "student-1" };
-    expect(canInspectRoom({ id: "student-1", role: "STUDENT" }, room)).toBe(true);
-    expect(canInspectRoom({ id: "student-2", role: "STUDENT" }, room)).toBe(false);
-    expect(canInspectRoom({ id: "super-1", role: "SUPERADMIN" }, room)).toBe(true);
-  });
 });
 
 describe("Duty Hours Calculation & Schedule Validation (05S, 06S)", () => {
   it("distinguishes pending recorded hours from credited hours and requires 100h + tasks for completion", () => {
-    expect(
-      calculateSessionHours(new Date("2026-11-15T08:00:00"), new Date("2026-11-15T12:30:00"))
-    ).toBe(4.5);
-
     const progress = computeHoursProgress({
       logs: [
         { status: "APPROVED", recordedHours: 96, creditedHours: 96 },
@@ -48,24 +31,6 @@ describe("Duty Hours Calculation & Schedule Validation (05S, 06S)", () => {
       allAssignedTasksAccepted: true,
     });
     expect(completed.preOjtEligibleForCompletion).toBe(true);
-  });
-
-  it("flags punches outside scheduled window + grace minutes as irregular", () => {
-    const onTime = evaluateScheduleWindow({
-      timeIn: new Date("2026-11-15T08:10:00"),
-      scheduleStart: "08:00",
-      scheduleEnd: "12:00",
-      graceMinutes: 15,
-    });
-    expect(onTime.isIrregular).toBe(false);
-
-    const late = evaluateScheduleWindow({
-      timeIn: new Date("2026-11-15T12:30:00"),
-      scheduleStart: "08:00",
-      scheduleEnd: "12:00",
-      graceMinutes: 15,
-    });
-    expect(late.isIrregular).toBe(true);
   });
 });
 

@@ -85,8 +85,7 @@ export default function ProfilePage() {
         body: JSON.stringify({
           fullName,
           phone,
-          program: isStudent ? program : "",
-          section: isStudent ? section : "",
+          ...(isStudent ? { program, section } : {}),
         }),
       });
       const body = (await res.json()) as { error?: string; message?: string };

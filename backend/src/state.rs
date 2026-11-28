@@ -20,7 +20,8 @@ impl RateLimiter {
         let now = Utc::now();
         let cutoff = now - window;
         let mut tx = db.begin().await?;
-        sqlx::query("DELETE FROM \"RateLimitHit\" WHERE \"attemptedAt\" < $1")
+        sqlx::query("DELETE FROM \"RateLimitHit\" WHERE \"bucketKey\"=$1 AND \"attemptedAt\" < $2")
+            .bind(key)
             .bind(cutoff)
             .execute(&mut *tx)
             .await?;

@@ -24,6 +24,7 @@ pub struct ImportRow {
     pub full_name: Option<String>,
     pub program: Option<String>,
     pub section: Option<String>,
+    #[serde(skip_serializing)]
     pub password: Option<String>,
 }
 
@@ -207,6 +208,35 @@ pub async fn students_import(
     let mut rows = parse_file(&name, &mime, &bytes)?;
     rows.retain(|r| r.email.is_some() || r.student_id_no.is_some() || r.full_name.is_some());
 
+    let required_hours: f64 = sqlx::query_scalar(
+        "SELECT \"requiredPreOjtHours\" FROM \"SystemConfig\" WHERE id='singleton'",
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .unwrap_or(100.0);
+
+    let passwords: Vec<Option<String>> = rows
+        .iter()
+        .map(|r| {
+            r.password
+                .as_deref()
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+        })
+        .collect();
+    let hashed_passwords = tokio::task::spawn_blocking(move || {
+        passwords
+            .into_iter()
+            .map(|opt| match opt {
+                Some(p) => hash_password(&p).map(Some),
+                None => Ok(None),
+            })
+            .collect::<Result<Vec<Option<String>>>>()
+    })
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))??;
+
     let mut created: Vec<ImportRow> = Vec::new();
     let mut skipped: Vec<ImportRow> = Vec::new();
     let mut overwritten: Vec<ImportRow> = Vec::new();
@@ -215,7 +245,7 @@ pub async fn students_import(
 
     let mut tx = state.db.begin().await?;
 
-    for row in &rows {
+    for (row, pre_hash) in rows.iter().zip(hashed_passwords.iter()) {
         if row.email.is_none() || row.student_id_no.is_none() || row.full_name.is_none() {
             errors.push(RowError {
                 row: row.clone(),
@@ -305,25 +335,21 @@ pub async fn students_import(
             }
         }
 
-        let pw_hash = match &row.password {
-            Some(p) if !p.trim().is_empty() => {
-                hash_password(p.trim()).map_err(|e| AppError::Internal(e.to_string()))?
-            }
-            _ => String::new(),
-        };
+        let pw_hash = pre_hash.as_deref().unwrap_or("");
 
         let id = uuid::Uuid::new_v4().to_string();
         sqlx::query(
-            "INSERT INTO \"User\" (id, email, \"passwordHash\", \"fullName\", role, status, \"studentIdNo\", program, section, \"batchId\", \"createdAt\", \"updatedAt\") VALUES ($1,$2,$3,$4,'STUDENT','PENDING_VERIFICATION',$5,$6,$7,$8,NOW(),NOW())",
+            "INSERT INTO \"User\" (id, email, \"passwordHash\", \"fullName\", role, status, \"studentIdNo\", program, section, \"batchId\", \"requiredHours\", \"createdAt\", \"updatedAt\") VALUES ($1,$2,$3,$4,'STUDENT','PENDING_VERIFICATION',$5,$6,$7,$8,$9,NOW(),NOW())",
         )
         .bind(&id)
         .bind(&email)
-        .bind(&pw_hash)
+        .bind(pw_hash)
         .bind(row.full_name.as_ref().unwrap())
         .bind(&row.student_id_no)
         .bind(&row.program)
         .bind(&row.section)
         .bind(&batch_id)
+        .bind(required_hours)
         .execute(&mut *tx)
         .await?;
         created.push(row.clone());

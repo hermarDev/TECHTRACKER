@@ -65,10 +65,11 @@ async fn can_read(state: &AppState, user: &SessionPayload, key: &str) -> Result<
             return Ok(true);
         }
         let in_inspection = sqlx::query(
-            "SELECT 1 FROM \"InspectionItem\" ii JOIN \"Inspection\" i ON i.id=ii.\"inspectionId\" JOIN \"LabRoom\" r ON r.id=i.\"roomId\" WHERE ii.\"photoKey\"=$1 AND (r.\"assignedStudentId\"=$2 OR r.\"assignedAdminId\"=$2 OR i.\"inspectorId\"=$2) LIMIT 1",
+            "SELECT 1 FROM \"InspectionItem\" ii JOIN \"Inspection\" i ON i.id=ii.\"inspectionId\" JOIN \"LabRoom\" r ON r.id=i.\"roomId\" WHERE ii.\"photoKey\"=$1 AND (r.\"assignedStudentId\"=$2 OR r.\"assignedAdminId\"=$2 OR i.\"inspectorId\"=$2 OR ($3 = 'ADMIN' AND r.\"assignedAdminId\" IS NULL)) LIMIT 1",
         )
         .bind(key)
         .bind(&user.sub)
+        .bind(&user.role)
         .fetch_optional(&state.db)
         .await?;
         return Ok(in_inspection.is_some());

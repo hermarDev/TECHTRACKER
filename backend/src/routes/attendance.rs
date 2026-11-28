@@ -105,16 +105,6 @@ pub(crate) async fn pre_ojt_completed_map(
     Ok(result)
 }
 
-fn normalize_pagination(page: Option<i64>, page_size: Option<i64>) -> (i64, i64, i64) {
-    let page = page.unwrap_or(1).max(1);
-    let mut ps = page_size.unwrap_or(15);
-    if ![15, 25, 50].contains(&ps) {
-        ps = 15;
-    }
-    let skip = (page - 1) * ps;
-    (page, ps, skip)
-}
-
 async fn attendance_row(state: &AppState, id: &str) -> Result<sqlx::postgres::PgRow> {
     Ok(sqlx::query("SELECT id,\"studentId\",\"batchId\",\"scheduleId\",\"shiftDate\"::timestamptz,\"timeIn\"::timestamptz,\"timeOut\"::timestamptz,\"photoInKey\",\"photoOutKey\",\"isIrregular\",\"irregularReason\",status::text,\"recordedHours\",\"creditedHours\",\"reviewerId\",\"reviewerRemarks\",\"reviewedAt\"::timestamptz,\"correctedById\",\"correctionReason\",\"correctedAt\"::timestamptz,\"createdAt\"::timestamptz,\"updatedAt\"::timestamptz FROM \"AttendanceLog\" WHERE id=$1")
         .bind(id).fetch_one(&state.db).await?)
@@ -156,7 +146,7 @@ async fn list(
     if !["STUDENT", "ADMIN", "SUPERADMIN"].contains(&auth.0.role.as_str()) {
         return Err(AppError::Forbidden);
     }
-    let (page, page_size, skip) = normalize_pagination(q.page, q.page_size);
+    let (page, page_size, skip) = super::normalize_pagination(q.page, q.page_size);
     let search = q.search.clone().unwrap_or_default().trim().to_string();
     let status = q.status.clone();
     let irregular = q.irregular.clone();
@@ -626,7 +616,7 @@ pub(crate) fn apply_credit_rounding(rule: &str, hours: f64) -> f64 {
     (rounded * 100.0).round() / 100.0
 }
 
-async fn credit_rounding_rule(state: &AppState) -> String {
+pub(crate) async fn credit_rounding_rule(state: &AppState) -> String {
     let row =
         sqlx::query("SELECT \"creditRoundingRule\" FROM \"SystemConfig\" WHERE id='singleton'")
             .fetch_optional(&state.db)
@@ -636,6 +626,28 @@ async fn credit_rounding_rule(state: &AppState) -> String {
     row.and_then(|r| r.try_get::<String, _>("creditRoundingRule").ok())
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "EXACT_MINUTES".to_string())
+}
+
+fn resolve_credited_hours(
+    rule: &str,
+    time_in: chrono::DateTime<Utc>,
+    time_out: Option<chrono::DateTime<Utc>>,
+    recorded_hours: f64,
+) -> f64 {
+    let Some(to) = time_out else {
+        return 0.0;
+    };
+    let hours = if recorded_hours > 0.0 {
+        recorded_hours
+    } else {
+        let diff_ms = to.timestamp_millis() - time_in.timestamp_millis();
+        if diff_ms <= 0 {
+            0.0
+        } else {
+            diff_ms as f64 / 3600000.0
+        }
+    };
+    apply_credit_rounding(rule, hours)
 }
 
 async fn review(
@@ -668,7 +680,7 @@ async fn review(
     let rule = credit_rounding_rule(&state).await;
     let mut tx = state.db.begin().await?;
     let att = sqlx::query(
-        "SELECT a.\"timeIn\"::timestamptz, a.\"timeOut\"::timestamptz, a.status::text AS att_status, b.\"coordinatorId\" FROM \"AttendanceLog\" a JOIN \"Batch\" b ON a.\"batchId\"=b.id WHERE a.id=$1 FOR UPDATE",
+        "SELECT a.\"timeIn\"::timestamptz, a.\"timeOut\"::timestamptz, a.\"recordedHours\", a.status::text AS att_status, b.\"coordinatorId\" FROM \"AttendanceLog\" a JOIN \"Batch\" b ON a.\"batchId\"=b.id WHERE a.id=$1 FOR UPDATE",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
@@ -691,18 +703,9 @@ async fn review(
     }
     let time_in: chrono::DateTime<Utc> = att.try_get("timeIn")?;
     let time_out: Option<chrono::DateTime<Utc>> = att.try_get("timeOut").ok();
+    let recorded_hours: f64 = att.try_get("recordedHours").unwrap_or(0.0);
     let credited = if b.status == "APPROVED" {
-        if let Some(to) = time_out {
-            let diff_ms = to.timestamp_millis() - time_in.timestamp_millis();
-            let hours = if diff_ms <= 0 {
-                0.0
-            } else {
-                diff_ms as f64 / 3600000.0
-            };
-            apply_credit_rounding(&rule, hours)
-        } else {
-            0.0
-        }
+        resolve_credited_hours(&rule, time_in, time_out, recorded_hours)
     } else {
         0.0
     };
@@ -1007,5 +1010,27 @@ mod tests {
         let day = parsed.with_timezone(&super::manila_tz()).date_naive();
         let stored = day.and_hms_opt(0, 0, 0).unwrap();
         assert_eq!(stored.to_string(), "2026-11-27 00:00:00");
+    }
+
+    #[test]
+    fn approval_uses_capped_recorded_hours_with_rounding() {
+        let time_in = chrono::DateTime::parse_from_rfc3339("2026-11-26T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        // Late Time-Out 10h later, but recordedHours was capped at 4.10h.
+        let time_out = Some(time_in + chrono::Duration::hours(10));
+        assert_eq!(
+            super::resolve_credited_hours("ROUND_DOWN_15", time_in, time_out, 4.10),
+            4.0
+        );
+        assert_eq!(
+            super::resolve_credited_hours("EXACT_MINUTES", time_in, time_out, 4.10),
+            4.1
+        );
+        // Falls back to elapsed time when recordedHours <= 0.
+        assert_eq!(
+            super::resolve_credited_hours("NEAREST_QUARTER", time_in, time_out, 0.0),
+            10.0
+        );
     }
 }

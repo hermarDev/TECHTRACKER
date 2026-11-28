@@ -48,15 +48,6 @@ fn require_sa(auth: &AuthUser) -> Result<()> {
     }
     Ok(())
 }
-fn norm(page: Option<i64>, ps: Option<i64>) -> (i64, i64, i64) {
-    let page = page.unwrap_or(1).max(1);
-    let mut p = ps.unwrap_or(15);
-    if ![15, 25, 50].contains(&p) {
-        p = 15;
-    }
-    (page, p, (page - 1) * p)
-}
-
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/superadmin/overview", get(overview))
@@ -111,7 +102,7 @@ async fn audit(
     Query(q): Query<AuditQ>,
 ) -> Result<Json<serde_json::Value>> {
     require_sa(&auth)?;
-    let (page, ps, skip) = norm(q.page, q.page_size);
+    let (page, ps, skip) = super::normalize_pagination(q.page, q.page_size);
     let mut count_query = QueryBuilder::new("SELECT COUNT(*) AS c FROM \"AuditLog\" a LEFT JOIN \"User\" u ON u.id=a.\"actorId\" WHERE TRUE");
     let mut data_query = QueryBuilder::new("SELECT a.id,a.\"actorId\",a.action,a.\"entityType\",a.\"entityId\",a.details,a.\"createdAt\"::timestamptz,u.\"fullName\" AS \"actorFullName\",u.email AS \"actorEmail\",u.role::text AS \"actorRole\" FROM \"AuditLog\" a LEFT JOIN \"User\" u ON u.id=a.\"actorId\" WHERE TRUE");
     if let Some(search) = q.search.as_deref().filter(|s| !s.is_empty()) {
@@ -187,12 +178,27 @@ async fn rooms_list(
 ) -> Result<Json<serde_json::Value>> {
     require_sa(&auth)?;
     let rows = sqlx::query("SELECT id,name,building,capacity,\"isActive\",\"assignedAdminId\",\"assignedStudentId\",\"createdAt\"::timestamptz FROM \"LabRoom\" ORDER BY name ASC").fetch_all(&state.db).await?;
+    let room_ids: Vec<String> = rows
+        .iter()
+        .filter_map(|r| r.try_get::<String, _>("id").ok())
+        .collect();
+    let mut units_by_room: std::collections::HashMap<String, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
+    if !room_ids.is_empty() {
+        for u in sqlx::query("SELECT id,\"roomId\",\"unitCode\",specs,condition::text,\"lastInspectedAt\"::timestamptz FROM \"ComputerUnit\" WHERE \"roomId\" = ANY($1) ORDER BY \"unitCode\" ASC")
+            .bind(&room_ids)
+            .fetch_all(&state.db)
+            .await?
+        {
+            let room_id: String = u.try_get("roomId").unwrap_or_default();
+            units_by_room.entry(room_id).or_default().push(unit_json(&u));
+        }
+    }
     let mut rooms = Vec::with_capacity(rows.len());
     for row in rows {
         let room_id: String = row.try_get("id")?;
-        let units = sqlx::query("SELECT id,\"roomId\",\"unitCode\",specs,condition::text,\"lastInspectedAt\"::timestamptz FROM \"ComputerUnit\" WHERE \"roomId\"=$1 ORDER BY \"unitCode\" ASC")
-            .bind(&room_id).fetch_all(&state.db).await?;
-        rooms.push(room_json(&row, units.iter().map(unit_json).collect()));
+        let units = units_by_room.remove(&room_id).unwrap_or_default();
+        rooms.push(room_json(&row, units));
     }
     Ok(Json(json!({"rooms": rooms})))
 }
@@ -304,12 +310,13 @@ async fn rooms_patch(
                 .await?
                 .ok_or(AppError::NotFound)?;
         let room_ref: String = unit.try_get("roomId")?;
+        let mut tx = state.db.begin().await?;
         if let Some(code) = body.get("unitCode").and_then(serde_json::Value::as_str) {
             let code = code.trim();
             if code.is_empty() || code.chars().count() > 40 {
                 return Err(AppError::BadRequest("Invalid unit code".into()));
             }
-            let taken = sqlx::query("SELECT id FROM \"ComputerUnit\" WHERE \"roomId\"=$1 AND \"unitCode\"=$2 AND id<>$3").bind(&room_ref).bind(code).bind(unit_id).fetch_optional(&state.db).await?;
+            let taken = sqlx::query("SELECT id FROM \"ComputerUnit\" WHERE \"roomId\"=$1 AND \"unitCode\"=$2 AND id<>$3").bind(&room_ref).bind(code).bind(unit_id).fetch_optional(&mut *tx).await?;
             if taken.is_some() {
                 return Err(AppError::Conflict(
                     "Another unit in this room already uses that unit code".into(),
@@ -318,7 +325,7 @@ async fn rooms_patch(
             sqlx::query("UPDATE \"ComputerUnit\" SET \"unitCode\"=$1 WHERE id=$2")
                 .bind(code)
                 .bind(unit_id)
-                .execute(&state.db)
+                .execute(&mut *tx)
                 .await?;
         }
         if let Some(specs) = body.get("specs").and_then(serde_json::Value::as_str) {
@@ -328,7 +335,7 @@ async fn rooms_patch(
             sqlx::query("UPDATE \"ComputerUnit\" SET specs=$1 WHERE id=$2")
                 .bind(specs.trim())
                 .bind(unit_id)
-                .execute(&state.db)
+                .execute(&mut *tx)
                 .await?;
         }
         if let Some(condition) = body.get("condition").and_then(serde_json::Value::as_str) {
@@ -338,9 +345,10 @@ async fn rooms_patch(
             sqlx::query("UPDATE \"ComputerUnit\" SET condition=$1::\"UnitCondition\" WHERE id=$2")
                 .bind(condition)
                 .bind(unit_id)
-                .execute(&state.db)
+                .execute(&mut *tx)
                 .await?;
         }
+        tx.commit().await?;
         crate::audit::write_audit_log(
             &state,
             Some(&auth.0.sub),
@@ -360,6 +368,16 @@ async fn rooms_patch(
         .fetch_optional(&state.db)
         .await?
         .ok_or(AppError::NotFound)?;
+    if let Some(value) = body.get("assignedAdminId") {
+        validate_room_assignees(&state, value.as_str(), None).await?;
+    }
+    if let Some(value) = body.get("assignedStudentId") {
+        validate_room_assignees(&state, None, value.as_str()).await?;
+    }
+    if let Some(units) = new_units {
+        validate_units(units)?;
+    }
+    let mut tx = state.db.begin().await?;
     if let Some(name) = body.get("name").and_then(serde_json::Value::as_str) {
         let name = name.trim();
         if name.chars().count() < 2 || name.chars().count() > 120 {
@@ -368,7 +386,7 @@ async fn rooms_patch(
         let taken = sqlx::query("SELECT id FROM \"LabRoom\" WHERE name=$1 AND id<>$2")
             .bind(name)
             .bind(room_id)
-            .fetch_optional(&state.db)
+            .fetch_optional(&mut *tx)
             .await?;
         if taken.is_some() {
             return Err(AppError::Conflict(
@@ -378,7 +396,7 @@ async fn rooms_patch(
         sqlx::query("UPDATE \"LabRoom\" SET name=$1 WHERE id=$2")
             .bind(name)
             .bind(room_id)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(building) = body.get("building").and_then(serde_json::Value::as_str) {
@@ -389,7 +407,7 @@ async fn rooms_patch(
         sqlx::query("UPDATE \"LabRoom\" SET building=$1 WHERE id=$2")
             .bind(building)
             .bind(room_id)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(capacity) = body.get("capacity").and_then(serde_json::Value::as_i64) {
@@ -399,37 +417,33 @@ async fn rooms_patch(
         sqlx::query("UPDATE \"LabRoom\" SET capacity=$1 WHERE id=$2")
             .bind(capacity as i32)
             .bind(room_id)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(active) = body.get("isActive").and_then(serde_json::Value::as_bool) {
         sqlx::query("UPDATE \"LabRoom\" SET \"isActive\"=$1 WHERE id=$2")
             .bind(active)
             .bind(room_id)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(value) = body.get("assignedAdminId") {
         let id = value.as_str();
-        validate_room_assignees(&state, id, None).await?;
         sqlx::query("UPDATE \"LabRoom\" SET \"assignedAdminId\"=$1 WHERE id=$2")
             .bind(id)
             .bind(room_id)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(value) = body.get("assignedStudentId") {
         let id = value.as_str();
-        validate_room_assignees(&state, None, id).await?;
         sqlx::query("UPDATE \"LabRoom\" SET \"assignedStudentId\"=$1 WHERE id=$2")
             .bind(id)
             .bind(room_id)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(units) = new_units {
-        validate_units(units)?;
-        let mut tx = state.db.begin().await?;
         for unit in units {
             let code = unit
                 .get("unitCode")
@@ -450,8 +464,8 @@ async fn rooms_patch(
             }
             insert_unit(&mut tx, room_id, unit).await?;
         }
-        tx.commit().await?;
     }
+    tx.commit().await?;
     let action = if new_units.is_some_and(|units| !units.is_empty()) {
         "UNITS_ADDED"
     } else {
@@ -560,7 +574,7 @@ async fn esc_list(
     Query(q): Query<PageQ>,
 ) -> Result<Json<serde_json::Value>> {
     require_sa(&auth)?;
-    let (page, ps, skip) = norm(q.page, q.page_size);
+    let (page, ps, skip) = super::normalize_pagination(q.page, q.page_size);
     let mut count_query =
         QueryBuilder::new("SELECT COUNT(*) AS c FROM \"EscalationCase\" WHERE TRUE");
     let mut data_query = QueryBuilder::new("SELECT e.id,e.\"sourceType\"::text,e.\"sourceId\",e.\"raisedById\",e.\"studentId\",e.summary,e.\"policyDetails\",e.status::text,e.\"rulingNote\",e.\"ruledById\",e.\"ruledAt\"::timestamptz,e.\"createdAt\"::timestamptz,s.\"fullName\" AS \"studentName\",s.email AS \"studentEmail\",s.\"studentIdNo\",rb.\"fullName\" AS \"raisedName\",rb.role::text AS \"raisedRole\",ub.\"fullName\" AS \"ruledName\",ub.role::text AS \"ruledRole\" FROM \"EscalationCase\" e JOIN \"User\" s ON s.id=e.\"studentId\" JOIN \"User\" rb ON rb.id=e.\"raisedById\" LEFT JOIN \"User\" ub ON ub.id=e.\"ruledById\" WHERE TRUE");
@@ -629,7 +643,9 @@ async fn esc_patch(
     if !["APPROVED", "UPHELD", "DISMISSED"].contains(&status) {
         return Err(AppError::BadRequest("Invalid escalation status".into()));
     }
-    let escalation = sqlx::query("SELECT id,\"sourceType\"::text,\"sourceId\",\"raisedById\",\"studentId\",status::text FROM \"EscalationCase\" WHERE id=$1").bind(escalation_id).fetch_optional(&state.db).await?.ok_or(AppError::NotFound)?;
+    let rule = crate::routes::attendance::credit_rounding_rule(&state).await;
+    let mut tx = state.db.begin().await?;
+    let escalation = sqlx::query("SELECT id,\"sourceType\"::text,\"sourceId\",\"raisedById\",\"studentId\",status::text FROM \"EscalationCase\" WHERE id=$1 FOR UPDATE").bind(escalation_id).fetch_optional(&mut *tx).await?.ok_or(AppError::NotFound)?;
     let previous_status: String = escalation.try_get("status")?;
     if previous_status != "OPEN" {
         return Err(AppError::Conflict(format!(
@@ -642,7 +658,6 @@ async fn esc_patch(
     let raised_by_id: String = escalation.try_get("raisedById")?;
     let ruled_at = Utc::now();
     let in_students_favour = status == "APPROVED" || status == "UPHELD";
-    let mut tx = state.db.begin().await?;
     if source_type == "ATTENDANCE" {
         let attendance = sqlx::query("SELECT \"recordedHours\" FROM \"AttendanceLog\" WHERE id=$1")
             .bind(&source_id)
@@ -650,7 +665,8 @@ async fn esc_patch(
             .await?;
         if let Some(attendance) = attendance {
             let credited: f64 = if in_students_favour {
-                attendance.try_get("recordedHours")?
+                let recorded_hours: f64 = attendance.try_get("recordedHours").unwrap_or(0.0);
+                crate::routes::attendance::apply_credit_rounding(&rule, recorded_hours)
             } else {
                 0.0
             };
@@ -663,19 +679,26 @@ async fn esc_patch(
             .fetch_optional(&mut *tx)
             .await?;
         if assignment.is_some() {
-            sqlx::query("UPDATE \"TaskAssignment\" SET status=$1::\"TaskAssignmentStatus\",\"updatedAt\"=NOW() WHERE id=$2")
-                .bind(if in_students_favour {
-                    "ACCEPTED"
-                } else {
-                    "RETURNED"
-                })
-                .bind(&source_id)
-                .execute(&mut *tx)
-                .await?;
+            if in_students_favour {
+                sqlx::query("UPDATE \"TaskAssignment\" SET status='ACCEPTED'::\"TaskAssignmentStatus\",\"acceptedAt\"=COALESCE(\"acceptedAt\", NOW()),\"updatedAt\"=NOW() WHERE id=$1")
+                    .bind(&source_id)
+                    .execute(&mut *tx)
+                    .await?;
+            } else {
+                sqlx::query("UPDATE \"TaskAssignment\" SET status='RETURNED'::\"TaskAssignmentStatus\",\"updatedAt\"=NOW() WHERE id=$1")
+                    .bind(&source_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
         }
     }
-    sqlx::query("UPDATE \"EscalationCase\" SET status=$1::\"EscalationStatus\",\"rulingNote\"=$2,\"ruledById\"=$3,\"ruledAt\"=$4 WHERE id=$5")
+    let esc_updated = sqlx::query("UPDATE \"EscalationCase\" SET status=$1::\"EscalationStatus\",\"rulingNote\"=$2,\"ruledById\"=$3,\"ruledAt\"=$4 WHERE id=$5 AND status='OPEN'")
         .bind(status).bind(ruling_note).bind(&auth.0.sub).bind(ruled_at).bind(escalation_id).execute(&mut *tx).await?;
+    if esc_updated.rows_affected() == 0 {
+        return Err(AppError::Conflict(format!(
+            "This escalation case was already ruled ({previous_status})"
+        )));
+    }
     let student_name: String = sqlx::query_scalar("SELECT \"fullName\" FROM \"User\" WHERE id=$1")
         .bind(&student_id)
         .fetch_one(&mut *tx)
@@ -810,33 +833,35 @@ async fn config_patch(
         }
     }
 
+    let mut tx = state.db.begin().await?;
     sqlx::query(
         "INSERT INTO \"SystemConfig\" (id, \"updatedAt\") VALUES ('singleton', NOW()) ON CONFLICT (id) DO NOTHING",
     )
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
     let previous = sqlx::query("SELECT \"requiredPreOjtHours\",\"taskCategories\",\"creditRoundingRule\",\"allowSelfRegistration\" FROM \"SystemConfig\" WHERE id='singleton'")
-        .fetch_one(&state.db).await?;
+        .fetch_one(&mut *tx).await?;
     let mut any = false;
     if let Some(v) = body.get("requiredPreOjtHours").and_then(|x| x.as_f64()) {
-        sqlx::query("UPDATE \"SystemConfig\" SET \"requiredPreOjtHours\"=$1,\"updatedAt\"=NOW() WHERE id='singleton'").bind(v).execute(&state.db).await?;
+        sqlx::query("UPDATE \"SystemConfig\" SET \"requiredPreOjtHours\"=$1,\"updatedAt\"=NOW() WHERE id='singleton'").bind(v).execute(&mut *tx).await?;
         any = true;
     }
     if let Some(v) = body.get("allowSelfRegistration").and_then(|x| x.as_bool()) {
-        sqlx::query("UPDATE \"SystemConfig\" SET \"allowSelfRegistration\"=$1,\"updatedAt\"=NOW() WHERE id='singleton'").bind(v).execute(&state.db).await?;
+        sqlx::query("UPDATE \"SystemConfig\" SET \"allowSelfRegistration\"=$1,\"updatedAt\"=NOW() WHERE id='singleton'").bind(v).execute(&mut *tx).await?;
         any = true;
     }
     if let Some(v) = body.get("creditRoundingRule").and_then(|x| x.as_str()) {
-        sqlx::query("UPDATE \"SystemConfig\" SET \"creditRoundingRule\"=$1,\"updatedAt\"=NOW() WHERE id='singleton'").bind(v).execute(&state.db).await?;
+        sqlx::query("UPDATE \"SystemConfig\" SET \"creditRoundingRule\"=$1,\"updatedAt\"=NOW() WHERE id='singleton'").bind(v).execute(&mut *tx).await?;
         any = true;
     }
     if let Some(v) = body.get("taskCategories") {
-        sqlx::query("UPDATE \"SystemConfig\" SET \"taskCategories\"=$1,\"updatedAt\"=NOW() WHERE id='singleton'").bind(v).execute(&state.db).await?;
+        sqlx::query("UPDATE \"SystemConfig\" SET \"taskCategories\"=$1,\"updatedAt\"=NOW() WHERE id='singleton'").bind(v).execute(&mut *tx).await?;
         any = true;
     }
     if !any {
         return Err(AppError::BadRequest("Invalid config.".into()));
     }
+    tx.commit().await?;
     let updated = sqlx::query("SELECT \"requiredPreOjtHours\",\"taskCategories\",\"creditRoundingRule\",\"allowSelfRegistration\",\"updatedAt\"::timestamptz FROM \"SystemConfig\" WHERE id='singleton'")
         .fetch_one(&state.db).await?;
     crate::audit::write_audit_log(&state, Some(&auth.0.sub), "SYSTEM_CONFIG_UPDATED", "SystemConfig", "singleton", json!({"changes": body, "previous": {"requiredPreOjtHours": previous.try_get::<f64,_>("requiredPreOjtHours")?, "taskCategories": previous.try_get::<serde_json::Value,_>("taskCategories")?, "creditRoundingRule": previous.try_get::<String,_>("creditRoundingRule")?, "allowSelfRegistration": previous.try_get::<bool,_>("allowSelfRegistration")?}})).await?;
@@ -855,7 +880,7 @@ async fn admins_list(
     Query(q): Query<AdminsQ>,
 ) -> Result<Json<serde_json::Value>> {
     require_sa(&auth)?;
-    let (page, ps, skip) = norm(q.page, q.page_size);
+    let (page, ps, skip) = super::normalize_pagination(q.page, q.page_size);
     let mut count_query =
         QueryBuilder::new("SELECT COUNT(*) AS c FROM \"User\" WHERE role::text='ADMIN'");
     let mut data_query = QueryBuilder::new("SELECT u.id,u.email,u.\"fullName\",u.phone,u.status::text,u.\"createdAt\"::timestamptz,(SELECT COUNT(*)::bigint FROM \"Batch\" b WHERE b.\"coordinatorId\"=u.id) AS \"coordinatedBatches\",(SELECT COUNT(*)::bigint FROM \"LabRoom\" r WHERE r.\"assignedAdminId\"=u.id) AS \"assignedRooms\" FROM \"User\" u WHERE u.role::text='ADMIN'");
@@ -1045,40 +1070,42 @@ async fn admins_patch(
             ));
         }
     }
+    let mut tx = state.db.begin().await?;
     if let Some(full_name) = full_name {
         sqlx::query("UPDATE \"User\" SET \"fullName\"=$1,\"updatedAt\"=NOW() WHERE id=$2")
             .bind(full_name.trim())
             .bind(admin_id)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(email) = email.as_deref() {
         sqlx::query("UPDATE \"User\" SET email=$1,\"updatedAt\"=NOW() WHERE id=$2")
             .bind(email)
             .bind(admin_id)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(phone) = phone {
         sqlx::query("UPDATE \"User\" SET phone=$1,\"updatedAt\"=NOW() WHERE id=$2")
             .bind(phone.as_str())
             .bind(admin_id)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(status) = status {
         if status == "DEACTIVATED" {
-            sqlx::query("UPDATE \"User\" SET status=$1::\"UserStatus\",\"lockedUntil\"=NULL,\"failedLoginCount\"=0,\"updatedAt\"=NOW() WHERE id=$2").bind(status).bind(admin_id).execute(&state.db).await?;
+            sqlx::query("UPDATE \"User\" SET status=$1::\"UserStatus\",\"lockedUntil\"=NULL,\"failedLoginCount\"=0,\"updatedAt\"=NOW() WHERE id=$2").bind(status).bind(admin_id).execute(&mut *tx).await?;
         } else {
             sqlx::query(
                 "UPDATE \"User\" SET status=$1::\"UserStatus\",\"updatedAt\"=NOW() WHERE id=$2",
             )
             .bind(status)
             .bind(admin_id)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
         }
     }
+    tx.commit().await?;
     let updated = sqlx::query(
         "SELECT id,\"fullName\",email,role::text,status::text FROM \"User\" WHERE id=$1",
     )

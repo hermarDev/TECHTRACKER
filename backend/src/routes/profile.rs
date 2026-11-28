@@ -101,11 +101,12 @@ async fn update_profile(
     }
 
     // Update only provided fields (TS sends undefined for absent keys).
+    let mut tx = state.db.begin().await?;
     if let Some(v) = &input.full_name {
         sqlx::query("UPDATE \"User\" SET \"fullName\"=$1, \"updatedAt\"=NOW() WHERE id=$2")
             .bind(v.trim())
             .bind(&auth.0.sub)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(v) = &input.phone {
@@ -117,23 +118,24 @@ async fn update_profile(
         sqlx::query("UPDATE \"User\" SET phone=$1, \"updatedAt\"=NOW() WHERE id=$2")
             .bind(pv)
             .bind(&auth.0.sub)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(v) = &input.program {
         sqlx::query("UPDATE \"User\" SET program=$1, \"updatedAt\"=NOW() WHERE id=$2")
             .bind(v.trim())
             .bind(&auth.0.sub)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(v) = &input.section {
         sqlx::query("UPDATE \"User\" SET section=$1, \"updatedAt\"=NOW() WHERE id=$2")
             .bind(v.trim())
             .bind(&auth.0.sub)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
+    tx.commit().await?;
 
     let row =
         sqlx::query("SELECT id,email,\"fullName\",phone,program,section FROM \"User\" WHERE id=$1")
@@ -167,7 +169,10 @@ async fn change_password(
     State(state): State<AppState>,
     auth: AuthUser,
     Json(body): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>> {
+) -> Result<axum::response::Response> {
+    use axum::http::header::SET_COOKIE;
+    use axum::response::IntoResponse;
+
     let input: ChangePasswordInput = serde_json::from_value(body)
         .map_err(|_| AppError::BadRequest("Invalid password change details".into()))?;
     if input.current_password.is_empty() {
@@ -199,11 +204,20 @@ async fn change_password(
         ));
     }
     let new_hash = hash_password(&input.new_password)?;
-    sqlx::query("UPDATE \"User\" SET \"passwordHash\"=$1, \"tokenVersion\"=\"tokenVersion\"+1, \"updatedAt\"=NOW() WHERE id=$2")
+    let updated_row = sqlx::query("UPDATE \"User\" SET \"passwordHash\"=$1, \"tokenVersion\"=\"tokenVersion\"+1, \"updatedAt\"=NOW() WHERE id=$2 RETURNING \"tokenVersion\"")
         .bind(&new_hash)
         .bind(&auth.0.sub)
-        .execute(&state.db)
+        .fetch_one(&state.db)
         .await?;
+    let token_version: i32 = updated_row.try_get("tokenVersion")?;
+    let mut refreshed_payload = auth.0.clone();
+    refreshed_payload.token_version = token_version;
+    let new_token = crate::auth::sign_session_jwt(&state.config, &refreshed_payload)?;
+    let cookie = crate::routes::auth::cookie_str(
+        &new_token,
+        crate::auth::SESSION_MAX_AGE_SECONDS,
+        state.config.is_prod(),
+    );
     write_audit_log(
         &state,
         Some(&auth.0.sub),
@@ -214,5 +228,9 @@ async fn change_password(
     )
     .await
     .ok();
-    Ok(Json(json!({"message": "Password changed successfully."})))
+    let mut response = Json(json!({"message": "Password changed successfully."})).into_response();
+    response
+        .headers_mut()
+        .insert(SET_COOKIE, cookie.parse().unwrap());
+    Ok(response)
 }
