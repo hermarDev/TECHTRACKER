@@ -60,6 +60,23 @@ pub fn router() -> Router<AppState> {
         .route("/api/admin/batches/:id", patch(batches_patch))
 }
 
+fn apply_report_limit(
+    query: &mut QueryBuilder<'_, sqlx::Postgres>,
+    is_export: bool,
+    page_size: i64,
+    skip: i64,
+) {
+    if is_export {
+        query.push(" LIMIT 10000");
+    } else {
+        query
+            .push(" LIMIT ")
+            .push_bind(page_size)
+            .push(" OFFSET ")
+            .push_bind(skip);
+    }
+}
+
 async fn reports(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -135,15 +152,7 @@ async fn reports(
                 .try_get("c")
                 .unwrap_or(0);
             data_query.push(" ORDER BY a.\"createdAt\" DESC");
-            if is_export {
-                data_query.push(" LIMIT 10000");
-            } else {
-                data_query
-                    .push(" LIMIT ")
-                    .push_bind(page_size)
-                    .push(" OFFSET ")
-                    .push_bind(skip);
-            }
+            apply_report_limit(&mut data_query, is_export, page_size, skip);
             (
                 report_rows(data_query.build().fetch_all(&state.db).await?),
                 total,
@@ -173,15 +182,7 @@ async fn reports(
                 .try_get("c")
                 .unwrap_or(0);
             data_query.push(" ORDER BY r.name ASC, u.\"unitCode\" ASC");
-            if is_export {
-                data_query.push(" LIMIT 10000");
-            } else {
-                data_query
-                    .push(" LIMIT ")
-                    .push_bind(page_size)
-                    .push(" OFFSET ")
-                    .push_bind(skip);
-            }
+            apply_report_limit(&mut data_query, is_export, page_size, skip);
             (
                 report_rows(data_query.build().fetch_all(&state.db).await?),
                 total,
@@ -239,15 +240,7 @@ async fn reports(
                 .try_get("c")
                 .unwrap_or(0);
             data_query.push(" ORDER BY a.\"shiftDate\" DESC");
-            if is_export {
-                data_query.push(" LIMIT 10000");
-            } else {
-                data_query
-                    .push(" LIMIT ")
-                    .push_bind(page_size)
-                    .push(" OFFSET ")
-                    .push_bind(skip);
-            }
+            apply_report_limit(&mut data_query, is_export, page_size, skip);
             (
                 report_rows(data_query.build().fetch_all(&state.db).await?),
                 total,
@@ -280,15 +273,7 @@ async fn reports(
                 .try_get("c")
                 .unwrap_or(0);
             data_query.push(" ORDER BY a.\"shiftDate\" DESC");
-            if is_export {
-                data_query.push(" LIMIT 10000");
-            } else {
-                data_query
-                    .push(" LIMIT ")
-                    .push_bind(page_size)
-                    .push(" OFFSET ")
-                    .push_bind(skip);
-            }
+            apply_report_limit(&mut data_query, is_export, page_size, skip);
             (
                 report_rows(data_query.build().fetch_all(&state.db).await?),
                 total,
@@ -870,6 +855,16 @@ async fn batches_create(
             return Err(AppError::BadRequest("Invalid batch.".into()));
         }
         if let Some(students) = body.get("students").and_then(serde_json::Value::as_array) {
+            let required_hours: f64 = if students.is_empty() {
+                100.0
+            } else {
+                sqlx::query_scalar(
+                    "SELECT \"requiredPreOjtHours\" FROM \"SystemConfig\" WHERE id='singleton'",
+                )
+                .fetch_optional(&mut *tx)
+                .await?
+                .unwrap_or(100.0)
+            };
             for student in students {
                 let email = student
                     .get("email")
@@ -921,12 +916,6 @@ async fn batches_create(
                     .execute(&mut *tx)
                     .await?;
                 } else {
-                    let required_hours: f64 = sqlx::query_scalar(
-                        "SELECT \"requiredPreOjtHours\" FROM \"SystemConfig\" WHERE id='singleton'",
-                    )
-                    .fetch_optional(&mut *tx)
-                    .await?
-                    .unwrap_or(100.0);
                     sqlx::query("INSERT INTO \"User\" (id,email,\"passwordHash\",\"fullName\",role,status,\"studentIdNo\",program,section,\"batchId\",\"requiredHours\",\"createdAt\",\"updatedAt\") VALUES ($1,$2,'',$3,'STUDENT','PENDING_VERIFICATION',$4,$5,$6,$7,$8,NOW(),NOW())")
                         .bind(uuid::Uuid::new_v4().to_string()).bind(email).bind(full_name.trim()).bind(student_id_no).bind(student.get("program").and_then(serde_json::Value::as_str)).bind(student.get("section").and_then(serde_json::Value::as_str)).bind(&batch_id).bind(required_hours).execute(&mut *tx).await?;
                 }

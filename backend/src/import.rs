@@ -9,7 +9,7 @@ use calamine::{open_workbook_auto_from_rs, Reader};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::Row;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 
 pub const MAX_IMPORT_BYTES: usize = 5 * 1024 * 1024;
@@ -215,9 +215,49 @@ pub async fn students_import(
     .await?
     .unwrap_or(100.0);
 
+    let valid_rows: Vec<_> = rows
+        .iter()
+        .filter_map(|r| {
+            let email = r.email.as_deref().filter(|s| !s.is_empty())?.to_lowercase();
+            let sid = r.student_id_no.as_deref().filter(|s| !s.is_empty())?;
+            r.full_name.as_deref().filter(|s| !s.is_empty())?;
+            Some((email, sid))
+        })
+        .collect();
+    let candidate_emails: Vec<_> = valid_rows.iter().map(|(email, _)| email.clone()).collect();
+    let candidate_sids: Vec<_> = valid_rows.iter().map(|(_, sid)| *sid).collect();
+    let mut existing_emails = HashSet::new();
+    let mut existing_sids = HashSet::new();
+    if rows
+        .iter()
+        .any(|r| r.password.as_deref().is_some_and(|p| !p.trim().is_empty()))
+        && !valid_rows.is_empty()
+    {
+        for existing in sqlx::query("SELECT email, \"studentIdNo\" FROM \"User\" WHERE email = ANY($1) OR \"studentIdNo\" = ANY($2)")
+            .bind(&candidate_emails).bind(&candidate_sids).fetch_all(&state.db).await? {
+            existing_emails.insert(existing.try_get::<String, _>("email")?);
+            if let Some(sid) = existing.try_get::<Option<String>, _>("studentIdNo")? {
+                existing_sids.insert(sid);
+            }
+        }
+    }
+    let mut seen_emails = HashSet::new();
+    let mut seen_sids = HashSet::new();
     let passwords: Vec<Option<String>> = rows
         .iter()
         .map(|r| {
+            let email = r.email.as_deref().filter(|s| !s.is_empty())?.to_lowercase();
+            let sid = r.student_id_no.as_deref().filter(|s| !s.is_empty())?;
+            r.full_name.as_deref().filter(|s| !s.is_empty())?;
+            if existing_emails.contains(&email)
+                || existing_sids.contains(sid)
+                || seen_emails.contains(&email)
+                || seen_sids.contains(sid)
+            {
+                return None;
+            }
+            seen_emails.insert(email);
+            seen_sids.insert(sid);
             r.password
                 .as_deref()
                 .map(str::trim)

@@ -298,21 +298,16 @@ async fn get_one(
     if auth.0.role == "ADMIN" && created_by != auth.0.sub {
         return Err(AppError::NotFound);
     }
-    if auth.0.role == "STUDENT" {
-        let assigned = sqlx::query(
-            "SELECT 1 FROM \"TaskAssignment\" WHERE \"taskId\"=$1 AND \"studentId\"=$2",
-        )
-        .bind(&id)
-        .bind(&auth.0.sub)
-        .fetch_optional(&state.db)
-        .await?;
-        if assigned.is_none() {
-            return Err(AppError::NotFound);
-        }
-    }
     // assignments with student, submissions, remarks
-    let assigns = sqlx::query("SELECT ta.id,ta.\"taskId\",ta.\"studentId\",ta.status::text,ta.\"startedAt\"::timestamptz,ta.\"acceptedAt\"::timestamptz,ta.\"createdAt\"::timestamptz,ta.\"updatedAt\"::timestamptz, u.\"fullName\",u.\"studentIdNo\" FROM \"TaskAssignment\" ta JOIN \"User\" u ON ta.\"studentId\"=u.id WHERE ta.\"taskId\"=$1")
-        .bind(&id).fetch_all(&state.db).await.unwrap_or_default();
+    let mut query = sqlx::QueryBuilder::new("SELECT ta.id,ta.\"taskId\",ta.\"studentId\",ta.status::text,ta.\"startedAt\"::timestamptz,ta.\"acceptedAt\"::timestamptz,ta.\"createdAt\"::timestamptz,ta.\"updatedAt\"::timestamptz, u.\"fullName\",u.\"studentIdNo\" FROM \"TaskAssignment\" ta JOIN \"User\" u ON ta.\"studentId\"=u.id WHERE ta.\"taskId\"=");
+    query.push_bind(&id);
+    if auth.0.role == "STUDENT" {
+        query.push(" AND ta.\"studentId\"=").push_bind(&auth.0.sub);
+    }
+    let assigns = query.build().fetch_all(&state.db).await?;
+    if assigns.is_empty() {
+        return Err(AppError::NotFound);
+    }
 
     let assignment_ids: Vec<String> = assigns
         .iter()
@@ -323,9 +318,13 @@ async fn get_one(
     let mut subs_by_assign: std::collections::HashMap<String, Vec<serde_json::Value>> =
         std::collections::HashMap::new();
     if !assignment_ids.is_empty() {
-        for rm in sqlx::query("SELECT tr.id,tr.\"assignmentId\",tr.\"authorId\",tr.visibility::text,tr.body,tr.\"createdAt\"::timestamptz,u.\"fullName\" AS \"authorFullName\" FROM \"TaskRemark\" tr LEFT JOIN \"User\" u ON u.id=tr.\"authorId\" WHERE tr.\"assignmentId\" = ANY($1) ORDER BY tr.\"createdAt\"::timestamptz ASC")
-            .bind(&assignment_ids).fetch_all(&state.db).await.unwrap_or_default()
-        {
+        let mut query = sqlx::QueryBuilder::new("SELECT tr.id,tr.\"assignmentId\",tr.\"authorId\",tr.visibility::text,tr.body,tr.\"createdAt\"::timestamptz,u.\"fullName\" AS \"authorFullName\" FROM \"TaskRemark\" tr LEFT JOIN \"User\" u ON u.id=tr.\"authorId\" WHERE tr.\"assignmentId\" = ANY(");
+        query.push_bind(&assignment_ids).push(")");
+        if auth.0.role == "STUDENT" {
+            query.push(" AND tr.visibility::text='STUDENT_VISIBLE'");
+        }
+        query.push(" ORDER BY tr.\"createdAt\"::timestamptz ASC");
+        for rm in query.build().fetch_all(&state.db).await.unwrap_or_default() {
             let aid: String = rm.try_get("assignmentId").unwrap_or_default();
             remarks_by_assign.entry(aid.clone()).or_default().push(json!({
                 "id": rm.try_get::<String,_>("id").unwrap_or_default(),
@@ -359,22 +358,8 @@ async fn get_one(
     for a in assigns {
         let aid: String = a.try_get("id")?;
         let student_id: String = a.try_get("studentId")?;
-        // student scope filtering
-        if auth.0.role == "STUDENT" && student_id != auth.0.sub {
-            continue;
-        }
         let remarks_json = remarks_by_assign.remove(&aid).unwrap_or_default();
         let subs_json = subs_by_assign.remove(&aid).unwrap_or_default();
-
-        // filter remarks visibility for students
-        let remarks_filtered = if auth.0.role == "STUDENT" {
-            remarks_json
-                .into_iter()
-                .filter(|r| r.get("visibility").and_then(|v| v.as_str()) == Some("STUDENT_VISIBLE"))
-                .collect()
-        } else {
-            remarks_json
-        };
 
         assignments.push(json!({
             "id": aid,
@@ -391,12 +376,8 @@ async fn get_one(
                 "studentIdNo": a.try_get::<Option<String>,_>("studentIdNo").unwrap_or(None),
             },
             "submissions": subs_json,
-            "remarks": remarks_filtered,
+            "remarks": remarks_json,
         }));
-    }
-
-    if assignments.is_empty() {
-        return Err(AppError::NotFound);
     }
 
     let task_json = json!({
